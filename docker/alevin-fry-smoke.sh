@@ -1,0 +1,214 @@
+#!/bin/sh
+set -eu
+
+AF=/opt/alevin-fry/bin/alevin-fry
+EXPECTED_VERSION=0.16.2
+MODE=${1:-}
+TMP_ROOT=${2:-/tmp}
+
+mkdir -p "$TMP_ROOT"
+
+fail() {
+    printf 'alevin-fry smoke: %s\n' "$*" >&2
+    exit 1
+}
+
+run_logged() {
+    log_file=$1
+    shift
+    if ! "$@" >"$log_file" 2>&1; then
+        cat "$log_file" >&2
+        return 1
+    fi
+}
+
+identity_check() {
+    version_output=$($AF --version 2>&1)
+    [ "$version_output" = "alevin-fry ${EXPECTED_VERSION}" ] || \
+        fail "unexpected version: ${version_output}"
+    test -s /opt/alevin-fry/share/licenses/alevin-fry/LICENSE
+    test -s /opt/alevin-fry/share/doc/alevin-fry/README.md
+    test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
+    grep -Fx "upstream_version=${EXPECTED_VERSION}" \
+        /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
+    grep -Fx "upstream_commit=d812531ef1c5fd22efec98cfc26b6f443b138650" \
+        /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
+    grep -E '^target_arch=(amd64|arm64)$' \
+        /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
+    ldd_output=$(ldd "$AF" 2>&1)
+    printf '%s\n' "$ldd_output" | grep -F "libc.so.6" >/dev/null
+    if printf '%s\n' "$ldd_output" | grep -F "not found" >/dev/null; then
+        printf '%s\n' "$ldd_output" >&2
+        fail "missing dynamic library"
+    fi
+}
+
+check_help() {
+    marker=$1
+    shift
+    "$AF" "$@" --help >"$help_file" 2>&1
+    grep -F -- "$marker" "$help_file" >/dev/null
+}
+
+quick_interfaces_check() {
+    help_file="${TMP_ROOT%/}/taf-alevin-fry-quick-help-$$.txt"
+    check_help "Process RAD files from the command line"
+    check_help "--multi-sample-output" quant
+    check_help "subcommand for processing scATAC-seq RAD files" atac
+    rm -f "$help_file"
+}
+
+interfaces_check() {
+    help_file="${TMP_ROOT%/}/taf-alevin-fry-help-$$.txt"
+    check_help "Process RAD files from the command line"
+    check_help "--sample-bc-list" generate-permit-list
+    check_help "--collation-mode" collate
+    check_help "--multi-sample-output" quant
+    check_help "parsimony-gene-em" quant
+    check_help "--count-mat" infer
+    check_help "--filter_best" convert
+    check_help "--header" view
+    check_help "generate-permit-list" atac
+    check_help "--permit-bc-ori" atac generate-permit-list
+    check_help "--max-records" atac sort
+    check_help "--compress" atac collate
+    check_help "--permit-bc-ori" atac deduplicate
+    rm -f "$help_file"
+}
+
+make_small_sam() {
+    sam_file=$1
+    cat >"$sam_file" <<'EOF'
+@HD	VN:1.6	SO:queryname
+@SQ	SN:tx1	LN:100
+@SQ	SN:tx2	LN:100
+r1	0	tx1	1	60	20M	*	0	0	ACGTACGTACGTACGTACGT	IIIIIIIIIIIIIIIIIIII	CR:Z:AAAAAAAAAAAAAAAA	UR:Z:CCCCCCCCCCCC
+r2	0	tx1	5	60	20M	*	0	0	CGTACGTACGTACGTACGTA	IIIIIIIIIIIIIIIIIIII	CR:Z:AAAAAAAAAAAAAAAA	UR:Z:GGGGGGGGGGGG
+r3	0	tx2	1	60	20M	*	0	0	TTTTCCCCAAAAGGGGTTTT	IIIIIIIIIIIIIIIIIIII	CR:Z:AAAAAAAAAAAAAAAA	UR:Z:TTTTTTTTTTTT
+r4	0	tx2	5	60	20M	*	0	0	CCCCAAAAGGGGTTTTCCCC	IIIIIIIIIIIIIIIIIIII	CR:Z:AAAAAAAAAAAAAAAA	UR:Z:AAAAAAAAAAAA
+r5	0	tx1	10	60	20M	*	0	0	AAAACCCCGGGGTTTTAAAA	IIIIIIIIIIIIIIIIIIII	CR:Z:AAAAAAAAAAAAAAAA	UR:Z:ACACACACACAC
+r5	256	tx2	10	50	20M	*	0	0	AAAACCCCGGGGTTTTAAAA	IIIIIIIIIIIIIIIIIIII	CR:Z:AAAAAAAAAAAAAAAA	UR:Z:ACACACACACAC
+EOF
+}
+
+make_large_sam() {
+    sam_file=$1
+    make_small_sam "$sam_file"
+    i=6
+    while [ "$i" -le 110 ]; do
+        printf 'r%s\t0\ttx1\t20\t60\t20M\t*\t0\t0\tACGTACGTACGTACGTACGT\tIIIIIIIIIIIIIIIIIIII\tCR:Z:AAAAAAAAAAAAAAAA\tUR:Z:AGAGAGAGAGAG\n' \
+            "$i" >>"$sam_file"
+        i=$((i + 1))
+    done
+}
+
+rad_check() {
+    work="${TMP_ROOT%/}/taf-alevin-fry-rad-$$"
+    rm -rf "$work"
+    mkdir -p "$work/map"
+    make_small_sam "$work/reads.sam"
+    run_logged "$work/convert.log" \
+        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 1
+    test -s "$work/map/map.rad"
+    "$AF" view -r "$work/map/map.rad" -H >"$work/view.tsv" 2>"$work/view.log"
+    grep -Fx '0:tx1' "$work/view.tsv" >/dev/null
+    grep -Fx '1:tx2' "$work/view.tsv" >/dev/null
+    grep -F 'CB:AAAAAAAAAAAAAAAA' "$work/view.tsv" >/dev/null
+    grep -F 'UMI:ACACACACACAC' "$work/view.tsv" >/dev/null
+    rm -rf "$work"
+}
+
+rna_check() {
+    work="${TMP_ROOT%/}/taf-alevin-fry-rna-$$"
+    rm -rf "$work"
+    mkdir -p "$work/map"
+    make_large_sam "$work/reads.sam"
+    run_logged "$work/convert.log" \
+        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 1
+    printf 'AAAAAAAAAAAAAAAA\n' >"$work/valid-barcodes.txt"
+    run_logged "$work/permit.log" \
+        "$AF" generate-permit-list \
+            -i "$work/map" -d fw -o "$work/permit" \
+            -u "$work/valid-barcodes.txt" -m 1 -t 1
+    test -s "$work/permit/permit_map.bin"
+    test -s "$work/permit/permit_freq.bin"
+    run_logged "$work/collate.log" \
+        "$AF" collate -i "$work/permit" -r "$work/map" \
+            -t 1 -m 100 --compress
+    test -s "$work/permit/map.collated.rad.sz"
+    test -s "$work/permit/collate.json"
+    printf 'tx1\tgeneA\ntx2\tgeneB\n' >"$work/t2g.tsv"
+    run_logged "$work/quant.log" \
+        "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
+            -o "$work/quant" -r parsimony -t 1 \
+            --dump-eqclasses --use-mtx
+    test -s "$work/quant/alevin/quants_mat.mtx"
+    test -s "$work/quant/alevin/quants_mat_rows.txt"
+    test -s "$work/quant/alevin/quants_mat_cols.txt"
+    test -s "$work/quant/alevin/geqc_counts.mtx"
+    test -s "$work/quant/alevin/gene_eqclass.txt.gz"
+    test -s "$work/quant/quant.json"
+    grep -Fx 'AAAAAAAAAAAAAAAA' "$work/quant/alevin/quants_mat_rows.txt" >/dev/null
+    grep -Fx 'geneA' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
+    grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
+    grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
+    grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
+    grep -F '"version_str": "0.16.2"' "$work/quant/quant.json" >/dev/null
+    rm -rf "$work"
+}
+
+infer_check() {
+    work="${TMP_ROOT%/}/taf-alevin-fry-infer-$$"
+    rm -rf "$work"
+    mkdir -p "$work/input"
+    cat >"$work/input/geqc_counts.mtx" <<'EOF'
+%%MatrixMarket matrix coordinate integer general
+%
+1 2 2
+1 1 2
+1 2 1
+EOF
+    printf 'AAAAAAAAAAAAAAAA\n' >"$work/input/quants_mat_rows.txt"
+    printf 'geneA\ngeneB\n' >"$work/input/quants_mat_cols.txt"
+    printf '2\n2\n0\t0\n1\t1\n' | gzip -n -c >"$work/input/gene_eqclass.txt.gz"
+    run_logged "$work/infer.log" \
+        "$AF" infer -c "$work/input/geqc_counts.mtx" \
+            -e "$work/input/gene_eqclass.txt.gz" \
+            -o "$work/output" -t 1 --use-mtx
+    test -s "$work/output/quants_mat.mtx"
+    test -s "$work/output/quants_mat_rows.txt"
+    test -s "$work/output/quants_mat_cols.txt"
+    grep -Fx 'AAAAAAAAAAAAAAAA' "$work/output/quants_mat_rows.txt" >/dev/null
+    grep -Fx 'geneA' "$work/output/quants_mat_cols.txt" >/dev/null
+    grep -Fx 'geneB' "$work/output/quants_mat_cols.txt" >/dev/null
+    grep -F '1 2 2' "$work/output/quants_mat.mtx" >/dev/null
+    rm -rf "$work"
+}
+
+case "$MODE" in
+    buildtime)
+        identity_check
+        quick_interfaces_check
+        rad_check
+        ;;
+    identity)
+        identity_check
+        ;;
+    interfaces)
+        interfaces_check
+        ;;
+    rad)
+        rad_check
+        ;;
+    rna)
+        rna_check
+        ;;
+    infer)
+        infer_check
+        ;;
+    *)
+        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|infer} [tmp-root]"
+        ;;
+esac
+
+printf 'alevin-fry smoke %s: PASS\n' "$MODE"
