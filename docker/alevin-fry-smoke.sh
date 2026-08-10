@@ -2,7 +2,7 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.16.2
+EXPECTED_VERSION=0.17.0
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
@@ -31,7 +31,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=d812531ef1c5fd22efec98cfc26b6f443b138650" \
+    grep -Fx "upstream_commit=aad62b805da8d317d466f78cf08f9d5e42c10cee" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -71,8 +71,13 @@ interfaces_check() {
     check_help "generate-permit-list" atac
     check_help "--permit-bc-ori" atac generate-permit-list
     check_help "--max-records" atac sort
-    check_help "--compress" atac collate
-    check_help "--permit-bc-ori" atac deduplicate
+    "$AF" atac --help >"$help_file" 2>&1
+    grep -F "generate-permit-list" "$help_file" >/dev/null
+    grep -F "sort" "$help_file" >/dev/null
+    if grep -F "collate" "$help_file" >/dev/null || \
+       grep -F "deduplicate" "$help_file" >/dev/null; then
+        fail "provisional ATAC subcommands unexpectedly visible in public help"
+    fi
     rm -f "$help_file"
 }
 
@@ -153,7 +158,18 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.16.2"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.17.0"' "$work/quant/quant.json" >/dev/null
+    run_logged "$work/infer-from-quant.log" \
+        "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
+            -e "$work/quant/alevin/gene_eqclass.txt.gz" \
+            -o "$work/infer-from-quant" -t 1 --use-mtx
+    test -s "$work/infer-from-quant/quants_mat.mtx"
+    test -s "$work/infer-from-quant/quants_mat_rows.txt"
+    test -s "$work/infer-from-quant/quants_mat_cols.txt"
+    grep -Fx 'AAAAAAAAAAAAAAAA' \
+        "$work/infer-from-quant/quants_mat_rows.txt" >/dev/null
+    grep -Fx 'geneA' "$work/infer-from-quant/quants_mat_cols.txt" >/dev/null
+    grep -Fx 'geneB' "$work/infer-from-quant/quants_mat_cols.txt" >/dev/null
     rm -rf "$work"
 }
 

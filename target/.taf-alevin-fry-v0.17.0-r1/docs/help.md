@@ -1,4 +1,4 @@
-alevin-fry 0.16.2-r1
+alevin-fry 0.17.0-r1
 
 Purpose:
   Process compatible RAD mappings into barcode permit lists, collated records,
@@ -22,7 +22,7 @@ Main subcommands:
   generate-permit-list  Call/correct cell barcodes from map.rad.
   collate               Group corrected RAD records by cell barcode.
   quant                 Produce gene or USA count matrices.
-  infer                 Infer counts from integer equivalence-class input.
+  infer                 Infer counts from real or integer eq-class input.
   convert               Convert queryname-grouped tagged SAM/BAM to RAD.
   view                  Print RAD headers and records.
   atac                   Process compatible scATAC-seq RAD files.
@@ -52,11 +52,13 @@ Key outputs:
   alevin/quants_mat_rows.txt and quants_mat_cols.txt
   quant.json and collate.json
 
-scATAC interfaces:
-  taf-alevin-fry alevin-fry atac generate-permit-list --help
-  taf-alevin-fry alevin-fry atac sort --help
-  taf-alevin-fry alevin-fry atac collate --help
-  taf-alevin-fry alevin-fry atac deduplicate --help
+Equivalence-class inference:
+  Add --dump-eqclasses to quant, then pass geqc_counts.mtx and
+  gene_eqclass.txt.gz to infer; see README.md for the complete command.
+  Version 0.17.0 accepts quant's real matrix and older integer matrices.
+
+Supported scATAC interfaces:
+  atac generate-permit-list and atac sort; append --help for each interface.
 
 Platform and resources:
   Native linux/amd64 and linux/arm64 images; CPU only; no database or model.
@@ -69,15 +71,13 @@ Boundaries:
   splici reference, bundle piscem/simpleaf, or run downstream cell statistics.
   A full ATAC run requires a mapper-compatible scATAC map.rad.
 
-Upstream 0.16.2 notes:
+Upstream 0.17.0 notes:
   Some filtered permit-list modes can emit a misleading barcode-length-zero
   warning; inspect JSON and counts before treating that message as failure.
-  quant --dump-eqclasses writes a real-typed Matrix Market header, while infer
-  requires integer input. Preserve the original and review a header-normalized
-  copy before direct infer use. See README.md for the exact boundary.
+  Direct quant --dump-eqclasses to infer processing is supported in 0.17.0.
+  Provisional atac collate/deduplicate are hidden; use permit-list then sort.
 
 Detailed documentation:
-  https://github.com/taffish/alevin-fry
   https://alevin-fry.readthedocs.io/en/latest/
   https://combine-lab.github.io/alevin-fry-tutorials/
 

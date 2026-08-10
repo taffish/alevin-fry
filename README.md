@@ -11,11 +11,11 @@ scATAC-seq RAD-processing interfaces.
 - Name: `alevin-fry`
 - Command: `taf-alevin-fry`
 - Kind: `tool`
-- TAFFISH version: `0.16.2-r1`
-- Container image: `ghcr.io/taffish/alevin-fry:0.16.2-r1`
-- Upstream release: [`v0.16.2`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.16.2)
-- Upstream commit: `d812531ef1c5fd22efec98cfc26b6f443b138650`
-- Runtime version: `alevin-fry 0.16.2`
+- TAFFISH version: `0.17.0-r1`
+- Container image: `ghcr.io/taffish/alevin-fry:0.17.0-r1`
+- Upstream release: [`v0.17.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.0)
+- Upstream commit: `aad62b805da8d317d466f78cf08f9d5e42c10cee`
+- Runtime version: `alevin-fry 0.17.0`
 - Native platforms: `linux/amd64`, `linux/arm64`
 - TAFFISH app license: `Apache-2.0`
 - Upstream license: `BSD-3-Clause`
@@ -25,8 +25,8 @@ release archives are pinned by SHA256:
 
 | Platform | Release asset SHA256 |
 | --- | --- |
-| `linux/amd64` | `2dbbec0db1c3d569bc7b51ab4bffe5fd6c13bdf0d45b82932b970503d65893c1` |
-| `linux/arm64` | `867689d53a19858b5005257b9f737f2973b3fc8e1f97e819f81714e746f101fb` |
+| `linux/amd64` | `b89df64c5e960d845feeadf4746dd425827903b7192211b942e9d343ce8c9621` |
+| `linux/arm64` | `97ae1c8249c7627b54ae02810e1d62fb6404e481ac1427aadd217adda312d54b` |
 
 ## Installation
 
@@ -39,7 +39,7 @@ For local validation before publication, use `taf install --from .` in this app 
 
 ## Scope
 
-This app exposes the complete upstream `v0.16.2` command surface:
+This app exposes the upstream `v0.17.0` command surface:
 
 - `generate-permit-list` with knee, expected-cell, forced-cell, explicit and
   unfiltered barcode-list modes
@@ -50,11 +50,11 @@ This app exposes the complete upstream `v0.16.2` command surface:
 - bootstraps, summary statistics, quantification subsets and equivalence-class
   dumps
 - separate, combined or both output layouts for multi-sample RAD input
-- `infer` from an integer equivalence-class count matrix
+- `infer` directly from the real-valued equivalence-class matrix written by
+  `quant --dump-eqclasses`, with integer-matrix backward compatibility
 - `convert` from queryname-grouped SAM/BAM with `CR` and `UR` tags to RAD
 - `view` for RAD headers and records
-- `atac generate-permit-list`, `atac sort`, `atac collate` and
-  `atac deduplicate`
+- supported `atac generate-permit-list` and `atac sort` processing
 
 This app does not map FASTQ reads, build a transcriptome index, choose a
 chemistry, create a splici reference or perform downstream cell-level
@@ -78,7 +78,7 @@ subcommands, not separate executables. Use the explicit packaged command form:
 
 ```sh
 taf-alevin-fry alevin-fry quant ...
-taf-alevin-fry alevin-fry atac deduplicate ...
+taf-alevin-fry alevin-fry atac sort ...
 ```
 
 Without the second `alevin-fry`, TAFFISH automatic command mode may interpret
@@ -112,6 +112,20 @@ taf-alevin-fry alevin-fry quant \
 `collate` has no output-directory option; it writes its collated RAD and
 `collate.json` into the permit-list directory.
 
+To dump and then re-infer gene equivalence classes, first add
+`--dump-eqclasses` to `quant`, then pass its outputs directly to `infer`:
+
+```sh
+taf-alevin-fry alevin-fry infer \
+  -c af-quant/alevin/geqc_counts.mtx \
+  -e af-quant/alevin/gene_eqclass.txt.gz \
+  -o af-infer -t 8 --use-mtx
+```
+
+Version 0.17.0 accepts the `real` Matrix Market file written by `quant` and
+also retains compatibility with older or third-party `integer` matrices. Keep
+the row and column label files beside `geqc_counts.mtx`.
+
 The transcript-to-gene map uses two columns for ordinary gene quantification:
 
 ```text
@@ -143,7 +157,7 @@ alignment scores where available. `convert` is not a FASTQ mapper.
 
 ## Multi-Barcode And Multi-Sample Data
 
-`v0.16.2` adds sample/library barcode correction and output controls. Supply
+Version 0.16.2 introduced sample/library barcode correction and output controls. Supply
 sample barcodes during permit-list generation:
 
 ```sh
@@ -162,18 +176,20 @@ selecting these options.
 
 ## scATAC-seq
 
-The `atac` command family supports permit-list generation, coordinate sorting,
-collation and deduplication of compatible scATAC RAD files:
+The supported `atac` command path provides permit-list generation and
+coordinate-sorted, deduplicated BED output from compatible scATAC RAD files:
 
 ```sh
 taf-alevin-fry alevin-fry atac generate-permit-list --help
 taf-alevin-fry alevin-fry atac sort --help
-taf-alevin-fry alevin-fry atac collate --help
-taf-alevin-fry alevin-fry atac deduplicate --help
 ```
 
 A compatible scATAC `map.rad`, normally created by the appropriate `piscem`
 mapping mode, is required. This image does not bundle piscem or an ATAC index.
+Upstream v0.17.0 fixes defects in the older `atac collate` and
+`atac deduplicate` implementations, but also hides both commands as
+provisional and explicitly identifies `generate-permit-list` followed by
+`sort` as the supported pipeline. This app follows that public boundary.
 
 ## Inputs And Outputs
 
@@ -189,7 +205,7 @@ mapping mode, is required. This image does not bundle piscem or an ATAC index.
 | `quants_mat_rows.txt` | Cell barcode labels |
 | `quants_mat_cols.txt` | Gene or feature labels |
 | `quant.json`, `collate.json` | Command, version and processing metadata |
-| ATAC BED output | Sorted or deduplicated fragment records from ATAC commands |
+| ATAC BED output | Coordinate-sorted, deduplicated fragments from `atac sort` |
 
 Keep the JSON metadata and label files with each matrix. Output directories
 must be writable and should not already contain unrelated results.
@@ -210,23 +226,22 @@ project inputs. Normal processing is offline. Paths under the working
 directory are visible through ordinary TAFFISH execution; paths elsewhere on
 the host need a backend-visible bind mount.
 
-## Upstream `v0.16.2` Behaviors
+## Upstream `v0.17.0` Changes And Behaviors
 
 - In the official release, some filtered permit-list modes may log that the
   provided permit list has barcode length zero even when no external list was
   provided. The outputs use the RAD `cblen` value; inspect the resulting JSON
   and barcode counts rather than treating this message alone as a wrapper
   failure.
-- `quant --dump-eqclasses` writes `geqc_counts.mtx` with a Matrix Market
-  `real` header, while the same release's `infer` reader accepts an `integer`
-  matrix. Counts are integer-valued, but direct chaining fails on the header
-  type. For this exact release, preserve the original file and create a
-  reviewed copy with only `real` changed to `integer` before `infer`, or wait
-  for an upstream fix. The smoke suite tests dump generation and valid integer
-  `infer` input independently.
+- `quant --dump-eqclasses` writes a `real` Matrix Market file. Version 0.17.0
+  fixes direct chaining by letting `infer` read that file first and fall back
+  to the older `integer` representation. The smoke suite tests both forms.
 - `infer` also expects `quants_mat_rows.txt` and `quants_mat_cols.txt` beside
   the count matrix and writes its three matrix/label outputs directly into the
   selected output directory.
+- The release adopts libradicl 0.17 and noodles 0.115, moves gzip handling to
+  the pure-Rust zlib-rs backend, and fixes ATAC collation chunk accounting and
+  a producer-start hang in provisional deduplication.
 
 ## Testing
 
@@ -234,23 +249,24 @@ The independent offline smoke suite checks:
 
 - exact release identity, commit provenance, architecture asset and dynamic
   library completeness
-- top-level help plus every RNA and ATAC command interface
+- top-level help plus all public RNA interfaces and the supported ATAC surface
 - real SAM-to-RAD conversion and RAD record inspection
 - permit-list generation, compressed collation and parsimony quantification
 - Matrix Market labels, JSON metadata and non-empty equivalence-class dumps
-- positive `infer` processing from a deterministic integer count matrix
+- direct `quant --dump-eqclasses` to `infer` processing from a real matrix
+- positive `infer` processing from a deterministic integer matrix
 
-The ATAC command surface is checked, but a full ATAC scientific run is not in
-the fast smoke suite because it requires mapper-specific ATAC RAD input. Smoke
-fixtures validate packaging behavior, not biological accuracy on production
-data.
+The smoke confirms that provisional ATAC commands remain hidden from public
+help. A full ATAC scientific run is not in the fast suite because it requires
+mapper-specific ATAC RAD input; smoke fixtures validate packaging behavior,
+not biological accuracy on production data.
 
 ## Documentation, License, And Citation
 
 - [Upstream repository](https://github.com/COMBINE-lab/alevin-fry)
 - [Alevin-fry documentation](https://alevin-fry.readthedocs.io/en/latest/)
 - [Official tutorials](https://combine-lab.github.io/alevin-fry-tutorials/)
-- [Release `v0.16.2`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.16.2)
+- [Release `v0.17.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.0)
 
 TAFFISH packaging code and documentation use Apache-2.0. The bundled upstream
 binary and notices remain BSD-3-Clause.

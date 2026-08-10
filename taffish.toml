@@ -1,7 +1,7 @@
 [package]
 name = "alevin-fry"
 kind = "tool"
-version = "0.16.2"
+version = "0.17.0"
 release = 1
 license = "Apache-2.0"
 main = "src/main.taf"
@@ -17,7 +17,7 @@ pipe = true
 command_mode = true
 
 [container]
-image = "ghcr.io/taffish/alevin-fry:0.16.2-r1"
+image = "ghcr.io/taffish/alevin-fry:0.17.0-r1"
 dockerfile = "docker/Dockerfile"
 build_platforms = "linux/amd64,linux/arm64"
 
@@ -25,7 +25,7 @@ build_platforms = "linux/amd64,linux/arm64"
 domain = "bio"
 categories = ["single-cell", "single-nucleus", "transcriptomics", "gene-expression", "chromatin-accessibility"]
 keywords = ["alevin-fry", "scRNA-seq", "snRNA-seq", "scATAC-seq", "RAD", "cell barcode", "UMI", "USA mode", "RNA velocity", "quantification"]
-description = "Alevin-fry 0.16.2 for barcode permit lists, RAD collation, sc/snRNA-seq quantification, equivalence-class inference, SAM/BAM conversion, RAD viewing, and scATAC-seq RAD processing."
+description = "Alevin-fry 0.17.0 for barcode permit lists, RAD collation, sc/snRNA-seq quantification, direct quant-to-infer equivalence-class processing, SAM/BAM conversion, RAD viewing, and supported scATAC-seq RAD processing."
 
 [upstream]
 name = "alevin-fry"
@@ -33,10 +33,10 @@ type = "github"
 repo = "COMBINE-lab/alevin-fry"
 homepage = "https://github.com/COMBINE-lab/alevin-fry"
 manual = "https://alevin-fry.readthedocs.io/en/latest/"
-release_url = "https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.16.2"
-downloads = "https://github.com/COMBINE-lab/alevin-fry/releases/download/v0.16.2/alevin-fry-x86_64-unknown-linux-gnu.tar.xz; https://github.com/COMBINE-lab/alevin-fry/releases/download/v0.16.2/alevin-fry-aarch64-unknown-linux-gnu.tar.xz"
-version = "0.16.2"
-commit = "d812531ef1c5fd22efec98cfc26b6f443b138650"
+release_url = "https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.0"
+downloads = "https://github.com/COMBINE-lab/alevin-fry/releases/download/v0.17.0/alevin-fry-x86_64-unknown-linux-gnu.tar.xz; https://github.com/COMBINE-lab/alevin-fry/releases/download/v0.17.0/alevin-fry-aarch64-unknown-linux-gnu.tar.xz"
+version = "0.17.0"
+commit = "aad62b805da8d317d466f78cf08f9d5e42c10cee"
 license = "BSD-3-Clause"
 description = "Memory-frugal processing and quantification of single-cell and single-nucleus RNA-seq data, with RAD utilities and scATAC-seq processing interfaces."
 citation = "He D, Zakeri M, Sarkar H, Soneson C, Srivastava A, Patro R. Alevin-fry unlocks rapid, accurate and memory-frugal quantification of single-cell RNA-seq data. Nature Methods. 2022;19:316-322."
