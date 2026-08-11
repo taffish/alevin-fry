@@ -11,11 +11,11 @@ scATAC-seq RAD-processing interfaces.
 - Name: `alevin-fry`
 - Command: `taf-alevin-fry`
 - Kind: `tool`
-- TAFFISH version: `0.17.0-r1`
-- Container image: `ghcr.io/taffish/alevin-fry:0.17.0-r1`
-- Upstream release: [`v0.17.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.0)
-- Upstream commit: `aad62b805da8d317d466f78cf08f9d5e42c10cee`
-- Runtime version: `alevin-fry 0.17.0`
+- TAFFISH version: `0.17.1-r1`
+- Container image: `ghcr.io/taffish/alevin-fry:0.17.1-r1`
+- Upstream release: [`v0.17.1`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.1)
+- Upstream commit: `9c82c0ba8432ceea18d25089833d82cc5950fb59`
+- Runtime version: `alevin-fry 0.17.1`
 - Native platforms: `linux/amd64`, `linux/arm64`
 - TAFFISH app license: `Apache-2.0`
 - Upstream license: `BSD-3-Clause`
@@ -25,8 +25,8 @@ release archives are pinned by SHA256:
 
 | Platform | Release asset SHA256 |
 | --- | --- |
-| `linux/amd64` | `b89df64c5e960d845feeadf4746dd425827903b7192211b942e9d343ce8c9621` |
-| `linux/arm64` | `97ae1c8249c7627b54ae02810e1d62fb6404e481ac1427aadd217adda312d54b` |
+| `linux/amd64` | `9f0ecdc66ba8d3aac7a9b79d092a10c57341209f5aef345965eb23692e73b56e` |
+| `linux/arm64` | `3562605999b8c650860bdd8bf85e19aef71fbac1332e8a02a6e3729069e78d70` |
 
 ## Installation
 
@@ -39,13 +39,15 @@ For local validation before publication, use `taf install --from .` in this app 
 
 ## Scope
 
-This app exposes the upstream `v0.17.0` command surface:
+This app exposes the upstream `v0.17.1` command surface:
 
 - `generate-permit-list` with knee, expected-cell, forced-cell, explicit and
   unfiltered barcode-list modes
 - multi-barcode/sample correction for assays such as 10x Flex
 - `collate` with compressed output and `two-round` or `fast` collation
 - `quant` with trivial, Cell Ranger-like, parsimony and EM resolutions
+- explicit `--small-thresh` control and JSON provenance for the tiny-cell
+  winner-take-all optimization
 - standard gene-count and unspliced/spliced/ambiguous (USA) quantification
 - bootstraps, summary statistics, quantification subsets and equivalence-class
   dumps
@@ -135,6 +137,12 @@ transcript_id<TAB>gene_id
 USA mode uses the upstream three-column transcript map and a compatible
 splici reference. Choose the orientation, permit-list strategy and resolution
 from the assay and study design; the examples are not universal defaults.
+
+In 0.17.1, cells with fewer than 100 records use a fast Cell Ranger-like
+winner-take-all path by default, independent of the requested `--resolution`.
+The selected cell count and indices are recorded in `quant.json`. Pass
+`--small-thresh 0` when every cell must use the requested resolution strategy.
+The prefer-ambiguity splicing model always uses the general path.
 
 ### Producing RAD Input
 
@@ -226,9 +234,23 @@ project inputs. Normal processing is offline. Paths under the working
 directory are visible through ordinary TAFFISH execution; paths elsewhere on
 the host need a backend-visible bind mount.
 
-## Upstream `v0.17.0` Changes And Behaviors
+## Upstream `v0.17.1` Changes And Behaviors
 
-- In the official release, some filtered permit-list modes may log that the
+- `--small-thresh` is public and effective again. Its default is 100, matching
+  the optimization that older versions actually applied; zero disables the
+  tiny-cell fast path.
+- `quant.json` now records `num_tiny_cell_resolved` and
+  `tiny_cell_resolved_cell_numbers`, so a run reveals which cells bypassed the
+  requested resolution strategy. The prefer-ambiguity splicing model bypasses
+  the fast path entirely.
+- Releases before 0.17.1 parsed `--small-thresh` but dropped it, while a
+  hard-coded threshold of 100 silently selected Cell Ranger-like semantics for
+  small cells. Re-run affected analyses with 0.17.1 when this distinction
+  matters scientifically.
+
+Compatibility notes retained from 0.17.0:
+
+- Some filtered permit-list modes may log that the
   provided permit list has barcode length zero even when no external list was
   provided. The outputs use the RAD `cblen` value; inspect the resulting JSON
   and barcode counts rather than treating this message alone as a wrapper
@@ -254,6 +276,8 @@ The independent offline smoke suite checks:
 - permit-list generation, compressed collation and parsimony quantification
 - Matrix Market labels, JSON metadata and non-empty equivalence-class dumps
 - direct `quant --dump-eqclasses` to `infer` processing from a real matrix
+- default and disabled tiny-cell resolution paths, including `quant.json`
+  threshold, count and cell-index provenance
 - positive `infer` processing from a deterministic integer matrix
 
 The smoke confirms that provisional ATAC commands remain hidden from public
@@ -266,7 +290,7 @@ not biological accuracy on production data.
 - [Upstream repository](https://github.com/COMBINE-lab/alevin-fry)
 - [Alevin-fry documentation](https://alevin-fry.readthedocs.io/en/latest/)
 - [Official tutorials](https://combine-lab.github.io/alevin-fry-tutorials/)
-- [Release `v0.17.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.0)
+- [Release `v0.17.1`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.1)
 
 TAFFISH packaging code and documentation use Apache-2.0. The bundled upstream
 binary and notices remain BSD-3-Clause.

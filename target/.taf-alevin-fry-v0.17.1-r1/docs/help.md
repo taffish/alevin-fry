@@ -1,4 +1,4 @@
-alevin-fry 0.17.0-r1
+alevin-fry 0.17.1-r1
 
 Purpose:
   Process compatible RAD mappings into barcode permit lists, collated records,
@@ -53,12 +53,10 @@ Key outputs:
   quant.json and collate.json
 
 Equivalence-class inference:
-  Add --dump-eqclasses to quant, then pass geqc_counts.mtx and
-  gene_eqclass.txt.gz to infer; see README.md for the complete command.
-  Version 0.17.0 accepts quant's real matrix and older integer matrices.
+  Pass geqc_counts.mtx and gene_eqclass.txt.gz from quant --dump-eqclasses to
+  infer; 0.17.0+ accepts quant's real matrix and older integer matrices.
 
-Supported scATAC interfaces:
-  atac generate-permit-list and atac sort; append --help for each interface.
+Supported scATAC: atac generate-permit-list and atac sort; append --help for each.
 
 Platform and resources:
   Native linux/amd64 and linux/arm64 images; CPU only; no database or model.
@@ -71,10 +69,12 @@ Boundaries:
   splici reference, bundle piscem/simpleaf, or run downstream cell statistics.
   A full ATAC run requires a mapper-compatible scATAC map.rad.
 
-Upstream 0.17.0 notes:
+Upstream version notes:
   Some filtered permit-list modes can emit a misleading barcode-length-zero
   warning; inspect JSON and counts before treating that message as failure.
-  Direct quant --dump-eqclasses to infer processing is supported in 0.17.0.
+  Since 0.17.0, quant output can be passed directly to infer.
+  In 0.17.1, --small-thresh is honored; default 100, zero disables fast-path.
+  quant.json records tiny-cell counts/indices; prefer-ambiguity bypasses it.
   Provisional atac collate/deduplicate are hidden; use permit-list then sort.
 
 Detailed documentation:

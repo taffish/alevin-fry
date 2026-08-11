@@ -2,7 +2,7 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.17.0
+EXPECTED_VERSION=0.17.1
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
@@ -31,7 +31,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=aad62b805da8d317d466f78cf08f9d5e42c10cee" \
+    grep -Fx "upstream_commit=9c82c0ba8432ceea18d25089833d82cc5950fb59" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -54,6 +54,7 @@ quick_interfaces_check() {
     help_file="${TMP_ROOT%/}/taf-alevin-fry-quick-help-$$.txt"
     check_help "Process RAD files from the command line"
     check_help "--multi-sample-output" quant
+    check_help "--small-thresh" quant
     check_help "subcommand for processing scATAC-seq RAD files" atac
     rm -f "$help_file"
 }
@@ -64,6 +65,7 @@ interfaces_check() {
     check_help "--sample-bc-list" generate-permit-list
     check_help "--collation-mode" collate
     check_help "--multi-sample-output" quant
+    check_help "--small-thresh" quant
     check_help "parsimony-gene-em" quant
     check_help "--count-mat" infer
     check_help "--filter_best" convert
@@ -79,6 +81,50 @@ interfaces_check() {
         fail "provisional ATAC subcommands unexpectedly visible in public help"
     fi
     rm -f "$help_file"
+}
+
+tiny_cell_check() {
+    work="${TMP_ROOT%/}/taf-alevin-fry-tiny-$$"
+    rm -rf "$work"
+    mkdir -p "$work/map"
+    make_small_sam "$work/reads.sam"
+    run_logged "$work/convert.log" \
+        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 1
+    printf 'AAAAAAAAAAAAAAAA\n' >"$work/valid-barcodes.txt"
+    run_logged "$work/permit.log" \
+        "$AF" generate-permit-list \
+            -i "$work/map" -d fw -o "$work/permit" \
+            -u "$work/valid-barcodes.txt" -m 1 -t 1
+    run_logged "$work/collate.log" \
+        "$AF" collate -i "$work/permit" -r "$work/map" \
+            -t 1 -m 100 --compress
+    printf 'tx1\tgeneA\ntx2\tgeneB\n' >"$work/t2g.tsv"
+
+    run_logged "$work/quant-default.log" \
+        "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
+            -o "$work/quant-default" -r parsimony-em -t 1 --use-mtx
+    test -s "$work/quant-default/quant.json"
+    default_json=$(tr -d '[:space:]' <"$work/quant-default/quant.json")
+    printf '%s\n' "$default_json" | \
+        grep -F '"num_tiny_cell_resolved":1' >/dev/null
+    printf '%s\n' "$default_json" | \
+        grep -F '"tiny_cell_resolved_cell_numbers":[0]' >/dev/null
+    printf '%s\n' "$default_json" | \
+        grep -F '"small_thresh":100' >/dev/null
+
+    run_logged "$work/quant-disabled.log" \
+        "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
+            -o "$work/quant-disabled" -r parsimony-em -t 1 \
+            --small-thresh 0 --use-mtx
+    test -s "$work/quant-disabled/quant.json"
+    disabled_json=$(tr -d '[:space:]' <"$work/quant-disabled/quant.json")
+    printf '%s\n' "$disabled_json" | \
+        grep -F '"num_tiny_cell_resolved":0' >/dev/null
+    printf '%s\n' "$disabled_json" | \
+        grep -F '"tiny_cell_resolved_cell_numbers":[]' >/dev/null
+    printf '%s\n' "$disabled_json" | \
+        grep -F '"small_thresh":0' >/dev/null
+    rm -rf "$work"
 }
 
 make_small_sam() {
@@ -158,7 +204,7 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.17.0"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.17.1"' "$work/quant/quant.json" >/dev/null
     run_logged "$work/infer-from-quant.log" \
         "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
             -e "$work/quant/alevin/gene_eqclass.txt.gz" \
@@ -219,11 +265,14 @@ case "$MODE" in
     rna)
         rna_check
         ;;
+    tiny)
+        tiny_cell_check
+        ;;
     infer)
         infer_check
         ;;
     *)
-        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|infer} [tmp-root]"
+        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer} [tmp-root]"
         ;;
 esac
 
