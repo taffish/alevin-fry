@@ -1,8 +1,8 @@
-alevin-fry 0.17.1-r1
+alevin-fry 0.18.0-r1
 
 Purpose:
-  Process compatible RAD mappings into barcode permit lists, collated records,
-  sc/snRNA-seq count matrices, equivalence-class results, or scATAC outputs.
+  Process RAD mappings into permit lists, collated records, count matrices,
+  equivalence-class results, or scATAC outputs.
 
 Usage:
   taf-alevin-fry -- --help
@@ -39,6 +39,8 @@ Permit-list modes:
   -b FILE               Explicit valid barcode list.
   -u FILE -m N          Unfiltered list with minimum read count.
   --sample-bc-list      Enable multi-barcode/sample correction.
+  --cell-bc-correction  Select unique or frequency correction.
+  --memory-limit SIZE   Bound GPL or collate working buffers.
 
 Common inputs:
   af-map/map.rad        Compatible piscem, legacy Salmon, or convert output.
@@ -46,7 +48,7 @@ Common inputs:
   CR and UR tags        Required cell barcode and UMI tags for convert input.
 
 Key outputs:
-  permit_map.bin and permit_freq.bin
+  permit_map.bin, permit_freq.bin, correction_plan.bin, and GPL JSON diagnostics
   map.collated.rad or map.collated.rad.sz
   alevin/quants_mat.mtx
   alevin/quants_mat_rows.txt and quants_mat_cols.txt
@@ -57,24 +59,22 @@ Equivalence-class inference:
   infer; 0.17.0+ accepts quant's real matrix and older integer matrices.
 
 Supported scATAC: atac generate-permit-list and atac sort; append --help for each.
-
 Platform and resources:
   Native linux/amd64 and linux/arm64 images; CPU only; no database or model.
   The official amd64 binary requires x86-64-v3/AVX2; use arm64 natively on Arm.
-  Use --threads for CPU parallelism and collate --max-records to bound memory.
+  Minimum two threads; use --memory-limit for buffers and GPL --tmp-dir for spills.
   Files outside the backend-visible working directory need a bind mount.
 
 Boundaries:
   This image does not map FASTQ, build an index, select chemistry, construct a
   splici reference, bundle piscem/simpleaf, or run downstream cell statistics.
+  QCatch interactive HTML QC is a separate downstream package, not this image.
   A full ATAC run requires a mapper-compatible scATAC map.rad.
-
 Upstream version notes:
-  Some filtered permit-list modes can emit a misleading barcode-length-zero
-  warning; inspect JSON and counts before treating that message as failure.
-  Since 0.17.0, quant output can be passed directly to infer.
-  In 0.17.1, --small-thresh is honored; default 100, zero disables fast-path.
-  quant.json records tiny-cell counts/indices; prefer-ambiguity bypasses it.
+  0.18.0 adds deterministic unique/frequency correction and correction_plan.bin.
+  Keep the plan with GPL output; confidence, neighborhood, and memory are explicit.
+  Legacy sample-correction-mode, max-records, and collation-mode remain hidden.
+  Quant output passes directly to infer; --small-thresh 0 disables fast-path.
   Provisional atac collate/deduplicate are hidden; use permit-list then sort.
 
 Detailed documentation:

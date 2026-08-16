@@ -2,7 +2,7 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.17.1
+EXPECTED_VERSION=0.18.0
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
@@ -31,7 +31,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=9c82c0ba8432ceea18d25089833d82cc5950fb59" \
+    grep -Fx "upstream_commit=85d0732413c7fc6352fb55c4a7c151f1a07c29e2" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -53,6 +53,8 @@ check_help() {
 quick_interfaces_check() {
     help_file="${TMP_ROOT%/}/taf-alevin-fry-quick-help-$$.txt"
     check_help "Process RAD files from the command line"
+    check_help "--cell-bc-correction" generate-permit-list
+    check_help "--memory-limit" collate
     check_help "--multi-sample-output" quant
     check_help "--small-thresh" quant
     check_help "subcommand for processing scATAC-seq RAD files" atac
@@ -63,7 +65,13 @@ interfaces_check() {
     help_file="${TMP_ROOT%/}/taf-alevin-fry-help-$$.txt"
     check_help "Process RAD files from the command line"
     check_help "--sample-bc-list" generate-permit-list
-    check_help "--collation-mode" collate
+    check_help "--sample-bc-correction" generate-permit-list
+    check_help "--cell-bc-correction" generate-permit-list
+    check_help "--cell-bc-neighborhood" generate-permit-list
+    check_help "--cell-bc-confidence" generate-permit-list
+    check_help "--memory-limit" generate-permit-list
+    check_help "--tmp-dir" generate-permit-list
+    check_help "--memory-limit" collate
     check_help "--multi-sample-output" quant
     check_help "--small-thresh" quant
     check_help "parsimony-gene-em" quant
@@ -72,13 +80,19 @@ interfaces_check() {
     check_help "--header" view
     check_help "generate-permit-list" atac
     check_help "--permit-bc-ori" atac generate-permit-list
-    check_help "--max-records" atac sort
+    check_help "--cell-bc-correction" atac generate-permit-list
+    check_help "--cell-bc-confidence" atac generate-permit-list
     "$AF" atac --help >"$help_file" 2>&1
     grep -F "generate-permit-list" "$help_file" >/dev/null
     grep -F "sort" "$help_file" >/dev/null
     if grep -F "collate" "$help_file" >/dev/null || \
        grep -F "deduplicate" "$help_file" >/dev/null; then
         fail "provisional ATAC subcommands unexpectedly visible in public help"
+    fi
+    "$AF" collate --help >"$help_file" 2>&1
+    if grep -F -- "--max-records" "$help_file" >/dev/null || \
+       grep -F -- "--collation-mode" "$help_file" >/dev/null; then
+        fail "deprecated collation controls unexpectedly visible in public help"
     fi
     rm -f "$help_file"
 }
@@ -89,20 +103,20 @@ tiny_cell_check() {
     mkdir -p "$work/map"
     make_small_sam "$work/reads.sam"
     run_logged "$work/convert.log" \
-        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 1
+        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 2
     printf 'AAAAAAAAAAAAAAAA\n' >"$work/valid-barcodes.txt"
     run_logged "$work/permit.log" \
         "$AF" generate-permit-list \
             -i "$work/map" -d fw -o "$work/permit" \
-            -u "$work/valid-barcodes.txt" -m 1 -t 1
+            -u "$work/valid-barcodes.txt" -m 1 -t 2
     run_logged "$work/collate.log" \
         "$AF" collate -i "$work/permit" -r "$work/map" \
-            -t 1 -m 100 --compress
+            -t 2 --memory-limit 256MiB --compress
     printf 'tx1\tgeneA\ntx2\tgeneB\n' >"$work/t2g.tsv"
 
     run_logged "$work/quant-default.log" \
         "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
-            -o "$work/quant-default" -r parsimony-em -t 1 --use-mtx
+            -o "$work/quant-default" -r parsimony-em -t 2 --use-mtx
     test -s "$work/quant-default/quant.json"
     default_json=$(tr -d '[:space:]' <"$work/quant-default/quant.json")
     printf '%s\n' "$default_json" | \
@@ -114,7 +128,7 @@ tiny_cell_check() {
 
     run_logged "$work/quant-disabled.log" \
         "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
-            -o "$work/quant-disabled" -r parsimony-em -t 1 \
+            -o "$work/quant-disabled" -r parsimony-em -t 2 \
             --small-thresh 0 --use-mtx
     test -s "$work/quant-disabled/quant.json"
     disabled_json=$(tr -d '[:space:]' <"$work/quant-disabled/quant.json")
@@ -151,6 +165,8 @@ make_large_sam() {
             "$i" >>"$sam_file"
         i=$((i + 1))
     done
+    printf 'r111\t0\ttx2\t25\t60\t20M\t*\t0\t0\tTTTTGGGGCCCCAAAATTTT\tIIIIIIIIIIIIIIIIIIII\tCR:Z:AAAAAAAAAAAAAAAC\tUR:Z:TGTGTGTGTGTG\n' \
+        >>"$sam_file"
 }
 
 rad_check() {
@@ -159,7 +175,7 @@ rad_check() {
     mkdir -p "$work/map"
     make_small_sam "$work/reads.sam"
     run_logged "$work/convert.log" \
-        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 1
+        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 2
     test -s "$work/map/map.rad"
     "$AF" view -r "$work/map/map.rad" -H >"$work/view.tsv" 2>"$work/view.log"
     grep -Fx '0:tx1' "$work/view.tsv" >/dev/null
@@ -175,23 +191,34 @@ rna_check() {
     mkdir -p "$work/map"
     make_large_sam "$work/reads.sam"
     run_logged "$work/convert.log" \
-        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 1
+        "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 2
     printf 'AAAAAAAAAAAAAAAA\n' >"$work/valid-barcodes.txt"
     run_logged "$work/permit.log" \
         "$AF" generate-permit-list \
             -i "$work/map" -d fw -o "$work/permit" \
-            -u "$work/valid-barcodes.txt" -m 1 -t 1
+            -u "$work/valid-barcodes.txt" -m 1 -t 2 \
+            --cell-bc-correction frequency \
+            --cell-bc-neighborhood hamming-1 \
+            --cell-bc-confidence 3/4 \
+            --memory-limit 256MiB --tmp-dir "$work/spool"
     test -s "$work/permit/permit_map.bin"
     test -s "$work/permit/permit_freq.bin"
+    test -s "$work/permit/correction_plan.bin"
+    test -s "$work/permit/generate_permit_list.json"
+    gpl_json=$(tr -d '[:space:]' <"$work/permit/generate_permit_list.json")
+    printf '%s\n' "$gpl_json" | grep -F '"cell_bc_correction":"frequency"' >/dev/null
+    printf '%s\n' "$gpl_json" | grep -F '"resolved_cell_bc_neighborhood":"hamming-1"' >/dev/null
+    printf '%s\n' "$gpl_json" | grep -F '"corrected_distinct":1' >/dev/null
+    printf '%s\n' "$gpl_json" | grep -F '"corrected_reads":1' >/dev/null
     run_logged "$work/collate.log" \
         "$AF" collate -i "$work/permit" -r "$work/map" \
-            -t 1 -m 100 --compress
+            -t 2 --memory-limit 256MiB --compress
     test -s "$work/permit/map.collated.rad.sz"
     test -s "$work/permit/collate.json"
     printf 'tx1\tgeneA\ntx2\tgeneB\n' >"$work/t2g.tsv"
     run_logged "$work/quant.log" \
         "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
-            -o "$work/quant" -r parsimony -t 1 \
+            -o "$work/quant" -r parsimony -t 2 \
             --dump-eqclasses --use-mtx
     test -s "$work/quant/alevin/quants_mat.mtx"
     test -s "$work/quant/alevin/quants_mat_rows.txt"
@@ -204,11 +231,11 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.17.1"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.18.0"' "$work/quant/quant.json" >/dev/null
     run_logged "$work/infer-from-quant.log" \
         "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
             -e "$work/quant/alevin/gene_eqclass.txt.gz" \
-            -o "$work/infer-from-quant" -t 1 --use-mtx
+            -o "$work/infer-from-quant" -t 2 --use-mtx
     test -s "$work/infer-from-quant/quants_mat.mtx"
     test -s "$work/infer-from-quant/quants_mat_rows.txt"
     test -s "$work/infer-from-quant/quants_mat_cols.txt"
@@ -236,7 +263,7 @@ EOF
     run_logged "$work/infer.log" \
         "$AF" infer -c "$work/input/geqc_counts.mtx" \
             -e "$work/input/gene_eqclass.txt.gz" \
-            -o "$work/output" -t 1 --use-mtx
+            -o "$work/output" -t 2 --use-mtx
     test -s "$work/output/quants_mat.mtx"
     test -s "$work/output/quants_mat_rows.txt"
     test -s "$work/output/quants_mat_cols.txt"

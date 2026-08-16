@@ -11,11 +11,11 @@ scATAC-seq RAD-processing interfaces.
 - Name: `alevin-fry`
 - Command: `taf-alevin-fry`
 - Kind: `tool`
-- TAFFISH version: `0.17.1-r1`
-- Container image: `ghcr.io/taffish/alevin-fry:0.17.1-r1`
-- Upstream release: [`v0.17.1`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.1)
-- Upstream commit: `9c82c0ba8432ceea18d25089833d82cc5950fb59`
-- Runtime version: `alevin-fry 0.17.1`
+- TAFFISH version: `0.18.0-r1`
+- Container image: `ghcr.io/taffish/alevin-fry:0.18.0-r1`
+- Upstream release: [`v0.18.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.0)
+- Upstream commit: `85d0732413c7fc6352fb55c4a7c151f1a07c29e2`
+- Runtime version: `alevin-fry 0.18.0`
 - Native platforms: `linux/amd64`, `linux/arm64`
 - TAFFISH app license: `Apache-2.0`
 - Upstream license: `BSD-3-Clause`
@@ -25,8 +25,8 @@ release archives are pinned by SHA256:
 
 | Platform | Release asset SHA256 |
 | --- | --- |
-| `linux/amd64` | `9f0ecdc66ba8d3aac7a9b79d092a10c57341209f5aef345965eb23692e73b56e` |
-| `linux/arm64` | `3562605999b8c650860bdd8bf85e19aef71fbac1332e8a02a6e3729069e78d70` |
+| `linux/amd64` | `20eaa923974019c6f246c27eabcae0359866224173c83474378608209b3c643c` |
+| `linux/arm64` | `8ab439adf2c0edaee4449b921e7b8ba8cfb10757535d61fdf450a7e753b5238a` |
 
 ## Installation
 
@@ -39,12 +39,17 @@ For local validation before publication, use `taf install --from .` in this app 
 
 ## Scope
 
-This app exposes the upstream `v0.17.1` command surface:
+This app exposes the upstream `v0.18.0` command surface:
 
 - `generate-permit-list` with knee, expected-cell, forced-cell, explicit and
   unfiltered barcode-list modes
-- multi-barcode/sample correction for assays such as 10x Flex
-- `collate` with compressed output and `two-round` or `fast` collation
+- deterministic `unique` or abundance-weighted `frequency` cell-barcode
+  correction across ordinary RNA filtering modes, multi-sample RNA and ATAC
+- exact, unique or frequency sample-barcode correction for assays such as 10x
+  Flex, with explicit neighbourhood and confidence controls
+- a versioned `correction_plan.bin` handoff consumed by collation and ATAC
+  sorting, with explicit compatibility fallback for older GPL output
+- bounded, optionally compressed `collate` processing with `--memory-limit`
 - `quant` with trivial, Cell Ranger-like, parsimony and EM resolutions
 - explicit `--small-thresh` control and JSON provenance for the tiny-cell
   winner-take-all optimization
@@ -60,13 +65,16 @@ This app exposes the upstream `v0.17.1` command surface:
 
 This app does not map FASTQ reads, build a transcriptome index, choose a
 chemistry, create a splici reference or perform downstream cell-level
-statistics. Those are separate workflow stages.
+statistics. Those are separate workflow stages. QCatch is a distinct
+downstream package that produces an interactive HTML QC report; it is not part
+of the alevin-fry executable or this CLI image.
 
 ## Container Contents
 
 - `alevin-fry`: the official upstream Rust executable
 - upstream README, changelog and BSD-3-Clause license
 - release asset URL, checksum, commit and target-architecture provenance
+- checksum-pinned Debian 12 slim runtime base
 - deterministic offline smoke fixtures generated at runtime
 
 The final image contains no compiler, Cargo cache, source tree, database,
@@ -112,7 +120,9 @@ taf-alevin-fry alevin-fry quant \
 ```
 
 `collate` has no output-directory option; it writes its collated RAD and
-`collate.json` into the permit-list directory.
+`collate.json` into the permit-list directory. Use `--memory-limit 2GiB` (or
+another explicit byte size) to bound its buffer budget; `--max-records` is a
+hidden compatibility option rather than the recommended resource control.
 
 To dump and then re-infer gene equivalence classes, first add
 `--dump-eqclasses` to `quant`, then pass its outputs directly to `infer`:
@@ -138,7 +148,7 @@ USA mode uses the upstream three-column transcript map and a compatible
 splici reference. Choose the orientation, permit-list strategy and resolution
 from the assay and study design; the examples are not universal defaults.
 
-In 0.17.1, cells with fewer than 100 records use a fast Cell Ranger-like
+Since 0.17.1, cells with fewer than 100 records use a fast Cell Ranger-like
 winner-take-all path by default, independent of the requested `--resolution`.
 The selected cell count and indices are recorded in `quant.json`. Pass
 `--small-thresh 0` when every cell must use the requested resolution strategy.
@@ -165,22 +175,31 @@ alignment scores where available. `convert` is not a FASTQ mapper.
 
 ## Multi-Barcode And Multi-Sample Data
 
-Version 0.16.2 introduced sample/library barcode correction and output controls. Supply
-sample barcodes during permit-list generation:
+Version 0.18.0 unifies cell and sample barcode correction. Supply sample
+barcodes and select the desired policies during permit-list generation:
 
 ```sh
 taf-alevin-fry alevin-fry generate-permit-list \
   -i af-map -d fw -o af-permit -k -t 8 \
   --sample-bc-list sample-barcodes.txt \
   --sample-names sample-names.tsv \
-  --sample-correction-mode 1-edit \
-  --sample-bc-ori forward
+  --sample-bc-correction frequency \
+  --sample-bc-neighborhood hamming-1 \
+  --sample-bc-confidence 0.975 \
+  --cell-bc-correction frequency \
+  --cell-bc-neighborhood hamming-1 \
+  --cell-bc-confidence 0.975 \
+  --memory-limit 1GiB --tmp-dir af-correction-tmp
 ```
 
-Use `collate --collation-mode two-round|fast` and
+The `unique` policy accepts only observations with one canonical target.
+`frequency` uses frozen exact counts and an exact confidence comparison.
+Sample correction also supports `exact`, which is the default. The legacy
+`--sample-correction-mode` and `--collation-mode` spellings remain accepted
+but are hidden from normal help. Use
 `quant --multi-sample-output separate|combined|both` as appropriate for the
-RAD barcode layout. Consult the exact upstream tutorial for the assay before
-selecting these options.
+RAD barcode layout, and consult the exact upstream tutorial before choosing
+assay-specific policies.
 
 ## scATAC-seq
 
@@ -207,7 +226,9 @@ provisional and explicitly identifies `generate-permit-list` followed by
 | Barcode list | Optional known/whitelist barcodes, one per line |
 | Sample barcode files | Optional multi-barcode whitelist and barcode-to-name TSV |
 | Transcript-to-gene map | Two-column ordinary map or upstream-defined three-column USA map |
-| `permit_map.bin`, `permit_freq.bin` | Barcode correction and frequency state |
+| `permit_map.bin`, `permit_freq.bin` | Compatibility map and corrected aggregate frequencies |
+| `correction_plan.bin` | Versioned internal GPL-to-collate/ATAC correction handoff |
+| `generate_permit_list.json` | Resolved correction policy and diagnostic counts |
 | `map.collated.rad[.sz]` | Cell-barcode-collated RAD records |
 | `quants_mat.mtx` | Cell-by-feature Matrix Market count matrix |
 | `quants_mat_rows.txt` | Cell barcode labels |
@@ -224,9 +245,13 @@ Native images are available for `linux/amd64` and `linux/arm64`. The official
 x86_64 release asset is compiled by upstream for `x86-64-v3` with AVX2, so the
 amd64 image requires an AVX2-capable CPU and can fail under emulators that do
 not expose AVX2. Arm hosts should use the native arm64 image. Alevin-fry is
-CPU-only; `--threads` controls parallel work. `collate --max-records` bounds
-the records retained in memory per batch, and compressed collation trades CPU
-for disk space.
+CPU-only; `--threads` controls parallel work. Version 0.18.0 uses two threads
+as its practical minimum and warns before raising smaller requests to two.
+`generate-permit-list --memory-limit` bounds deferred sample-frequency
+buffers (default 512 MiB), while `collate --memory-limit` bounds collation
+buffers (default 2 GiB). Values below 256 MiB warn and use 256 MiB. GPL
+`--tmp-dir` selects the Snappy-compressed spill directory. Compressed
+collation trades CPU for disk space.
 
 There is no embedded or downloadable database, model or reference package.
 All references, transcript maps, barcode lists and RAD files are explicit
@@ -234,36 +259,31 @@ project inputs. Normal processing is offline. Paths under the working
 directory are visible through ordinary TAFFISH execution; paths elsewhere on
 the host need a backend-visible bind mount.
 
-## Upstream `v0.17.1` Changes And Behaviors
+## Upstream `v0.18.0` Changes And Behaviors
 
-- `--small-thresh` is public and effective again. Its default is 100, matching
-  the optimization that older versions actually applied; zero disables the
-  tiny-cell fast path.
-- `quant.json` now records `num_tiny_cell_resolved` and
-  `tiny_cell_resolved_cell_numbers`, so a run reveals which cells bypassed the
-  requested resolution strategy. The prefer-ambiguity splicing model bypasses
-  the fast path entirely.
-- Releases before 0.17.1 parsed `--small-thresh` but dropped it, while a
-  hard-coded threshold of 100 silently selected Cell Ranger-like semantics for
-  small cells. Re-run affected analyses with 0.17.1 when this distinction
-  matters scientifically.
+- Barcode correction is deterministic across whitelist order, hash iteration,
+  worker completion order and thread count. Cell policies are `unique` and
+  `frequency`; sample policies are `exact`, `unique` and `frequency`.
+- Cell and sample frequency confidence accepts decimal or exact fraction
+  values. Neighbourhoods distinguish Hamming-1 from the historical
+  substitution-or-shift-1 rule.
+- GPL writes a versioned `correction_plan.bin`; current collation and ATAC
+  sorting apply those compiled decisions directly. A missing plan activates an
+  explicit older-output fallback, while a malformed or unsupported plan is an
+  error.
+- Ambiguous sample-frequency cases spill to bounded Snappy-compressed temporary
+  runs controlled by `--memory-limit` and `--tmp-dir`.
+- Single- and multi-barcode collation use bounded parallel engines.
+  `--sample-correction-mode`, `--max-records` and `--collation-mode` remain
+  accepted only as hidden compatibility spellings.
+- Quantification reuses sparse scratch/equivalence-class state, corrects
+  bootstrap and summary-stat handling, and release builds abort rather than
+  unwind on panic.
 
-Compatibility notes retained from 0.17.0:
-
-- Some filtered permit-list modes may log that the
-  provided permit list has barcode length zero even when no external list was
-  provided. The outputs use the RAD `cblen` value; inspect the resulting JSON
-  and barcode counts rather than treating this message alone as a wrapper
-  failure.
-- `quant --dump-eqclasses` writes a `real` Matrix Market file. Version 0.17.0
-  fixes direct chaining by letting `infer` read that file first and fall back
-  to the older `integer` representation. The smoke suite tests both forms.
-- `infer` also expects `quants_mat_rows.txt` and `quants_mat_cols.txt` beside
-  the count matrix and writes its three matrix/label outputs directly into the
-  selected output directory.
-- The release adopts libradicl 0.17 and noodles 0.115, moves gzip handling to
-  the pure-Rust zlib-rs backend, and fixes ATAC collation chunk accounting and
-  a producer-start hang in provisional deduplication.
+Compatibility retained from 0.17.x includes direct real-matrix
+`quant --dump-eqclasses` to `infer` processing, the explicit
+`--small-thresh` tiny-cell control and its JSON provenance, and the supported
+`atac generate-permit-list` then `atac sort` public surface.
 
 ## Testing
 
@@ -274,6 +294,8 @@ The independent offline smoke suite checks:
 - top-level help plus all public RNA interfaces and the supported ATAC surface
 - real SAM-to-RAD conversion and RAD record inspection
 - permit-list generation, compressed collation and parsimony quantification
+- frequency correction of a real one-mismatch barcode, exact correction
+  diagnostics and the versioned correction-plan handoff
 - Matrix Market labels, JSON metadata and non-empty equivalence-class dumps
 - direct `quant --dump-eqclasses` to `infer` processing from a real matrix
 - default and disabled tiny-cell resolution paths, including `quant.json`
@@ -290,7 +312,7 @@ not biological accuracy on production data.
 - [Upstream repository](https://github.com/COMBINE-lab/alevin-fry)
 - [Alevin-fry documentation](https://alevin-fry.readthedocs.io/en/latest/)
 - [Official tutorials](https://combine-lab.github.io/alevin-fry-tutorials/)
-- [Release `v0.17.1`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.17.1)
+- [Release `v0.18.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.0)
 
 TAFFISH packaging code and documentation use Apache-2.0. The bundled upstream
 binary and notices remain BSD-3-Clause.

@@ -1,11 +1,12 @@
-ARG ALEVIN_FRY_VERSION=0.17.1
-ARG ALEVIN_FRY_TAG=v0.17.1
-ARG ALEVIN_FRY_COMMIT=9c82c0ba8432ceea18d25089833d82cc5950fb59
-ARG ALEVIN_FRY_AMD64_SHA256=9f0ecdc66ba8d3aac7a9b79d092a10c57341209f5aef345965eb23692e73b56e
-ARG ALEVIN_FRY_ARM64_SHA256=3562605999b8c650860bdd8bf85e19aef71fbac1332e8a02a6e3729069e78d70
+ARG ALEVIN_FRY_VERSION=0.18.0
+ARG ALEVIN_FRY_TAG=v0.18.0
+ARG ALEVIN_FRY_COMMIT=85d0732413c7fc6352fb55c4a7c151f1a07c29e2
+ARG ALEVIN_FRY_AMD64_SHA256=20eaa923974019c6f246c27eabcae0359866224173c83474378608209b3c643c
+ARG ALEVIN_FRY_ARM64_SHA256=8ab439adf2c0edaee4449b921e7b8ba8cfb10757535d61fdf450a7e753b5238a
+ARG DEBIAN_BASE_DIGEST=sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 ARG BUILDARCH
 
-FROM debian:12-slim AS fetch
+FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS fetch
 
 ARG TARGETARCH
 ARG BUILDARCH
@@ -14,15 +15,23 @@ ARG ALEVIN_FRY_TAG
 ARG ALEVIN_FRY_COMMIT
 ARG ALEVIN_FRY_AMD64_SHA256
 ARG ALEVIN_FRY_ARM64_SHA256
+ARG DEBIAN_BASE_DIGEST
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN set -eux; \
-    apt-get -o Acquire::Retries=5 update; \
-    apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        xz-utils; \
+    installed=0; \
+    for attempt in 1 2 3; do \
+      if apt-get -o Acquire::Retries=5 update && \
+         apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+           ca-certificates curl xz-utils; then \
+        installed=1; \
+        break; \
+      fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep 5; \
+    done; \
+    [ "${installed}" -eq 1 ]; \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/alevin-fry-build
@@ -67,6 +76,7 @@ RUN set -eux; \
       printf "linux_arm64_asset_sha256=%s\n" "${ALEVIN_FRY_ARM64_SHA256}"; \
       printf "target_arch=%s\n" "${TARGETARCH}"; \
       printf "build_arch=%s\n" "${BUILDARCH}"; \
+      printf "base_image=debian:12-slim@%s\n" "${DEBIAN_BASE_DIGEST}"; \
       printf "upstream_x86_64_cpu=x86-64-v3,+avx2\n"; \
       printf "upstream_aarch64_cpu=neoverse-n1\n"; \
       printf "upstream_license=BSD-3-Clause\n"; \
@@ -77,7 +87,7 @@ RUN set -eux; \
       /opt/alevin-fry/bin/alevin-fry --version 2>&1 | grep -Fx "alevin-fry ${ALEVIN_FRY_VERSION}" >/dev/null; \
     fi
 
-FROM debian:12-slim
+FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 
 ARG ALEVIN_FRY_VERSION
 ARG TARGETARCH
