@@ -2,7 +2,7 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.18.0
+EXPECTED_VERSION=0.18.1
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
@@ -16,9 +16,14 @@ fail() {
 run_logged() {
     log_file=$1
     shift
-    if ! "$@" >"$log_file" 2>&1; then
-        cat "$log_file" >&2
-        return 1
+    set +e
+    "$@" >"$log_file" 2>&1
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ]; then
+        printf 'alevin-fry smoke: stage=%s exit=%s\n' "$log_file" "$status" >&2
+        tail -n 200 "$log_file" >&2 || true
+        return "$status"
     fi
 }
 
@@ -31,7 +36,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=85d0732413c7fc6352fb55c4a7c151f1a07c29e2" \
+    grep -Fx "upstream_commit=afa67499c59503d0996a0fbf8cf85cc3c45999a6" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -231,7 +236,7 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.18.0"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.18.1"' "$work/quant/quant.json" >/dev/null
     run_logged "$work/infer-from-quant.log" \
         "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
             -e "$work/quant/alevin/gene_eqclass.txt.gz" \

@@ -11,11 +11,11 @@ scATAC-seq RAD-processing interfaces.
 - Name: `alevin-fry`
 - Command: `taf-alevin-fry`
 - Kind: `tool`
-- TAFFISH version: `0.18.0-r1`
-- Container image: `ghcr.io/taffish/alevin-fry:0.18.0-r1`
-- Upstream release: [`v0.18.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.0)
-- Upstream commit: `85d0732413c7fc6352fb55c4a7c151f1a07c29e2`
-- Runtime version: `alevin-fry 0.18.0`
+- TAFFISH version: `0.18.1-r1`
+- Container image: `ghcr.io/taffish/alevin-fry:0.18.1-r1`
+- Upstream release: [`v0.18.1`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.1)
+- Upstream commit: `afa67499c59503d0996a0fbf8cf85cc3c45999a6`
+- Runtime version: `alevin-fry 0.18.1`
 - Native platforms: `linux/amd64`, `linux/arm64`
 - TAFFISH app license: `Apache-2.0`
 - Upstream license: `BSD-3-Clause`
@@ -25,8 +25,8 @@ release archives are pinned by SHA256:
 
 | Platform | Release asset SHA256 |
 | --- | --- |
-| `linux/amd64` | `20eaa923974019c6f246c27eabcae0359866224173c83474378608209b3c643c` |
-| `linux/arm64` | `8ab439adf2c0edaee4449b921e7b8ba8cfb10757535d61fdf450a7e753b5238a` |
+| `linux/amd64` | `8dc94acdc3f5e20723dd5c11460c4bf3066d0f7cc8c8cd54460c08cb24d2e5c4` |
+| `linux/arm64` | `bfb25069cfdf46f1a53703ca3fc767afdbaffc7b155d08d536ca60b42544e4b6` |
 
 ## Installation
 
@@ -39,7 +39,7 @@ For local validation before publication, use `taf install --from .` in this app 
 
 ## Scope
 
-This app exposes the upstream `v0.18.0` command surface:
+This app exposes the upstream `v0.18.1` command surface:
 
 - `generate-permit-list` with knee, expected-cell, forced-cell, explicit and
   unfiltered barcode-list modes
@@ -175,7 +175,7 @@ alignment scores where available. `convert` is not a FASTQ mapper.
 
 ## Multi-Barcode And Multi-Sample Data
 
-Version 0.18.0 unifies cell and sample barcode correction. Supply sample
+The 0.18 series unifies cell and sample barcode correction. Supply sample
 barcodes and select the desired policies during permit-list generation:
 
 ```sh
@@ -245,7 +245,7 @@ Native images are available for `linux/amd64` and `linux/arm64`. The official
 x86_64 release asset is compiled by upstream for `x86-64-v3` with AVX2, so the
 amd64 image requires an AVX2-capable CPU and can fail under emulators that do
 not expose AVX2. Arm hosts should use the native arm64 image. Alevin-fry is
-CPU-only; `--threads` controls parallel work. Version 0.18.0 uses two threads
+CPU-only; `--threads` controls parallel work. This release uses two threads
 as its practical minimum and warns before raising smaller requests to two.
 `generate-permit-list --memory-limit` bounds deferred sample-frequency
 buffers (default 512 MiB), while `collate --memory-limit` bounds collation
@@ -259,7 +259,32 @@ project inputs. Normal processing is offline. Paths under the working
 directory are visible through ordinary TAFFISH execution; paths elsewhere on
 the host need a backend-visible bind mount.
 
-## Upstream `v0.18.0` Changes And Behaviors
+The shared-resource installer gate is therefore N/A for this release: the
+program does not acquire or manage external persistent assets.
+Reference sequences, transcript maps, assay barcode lists and RAD files are
+study inputs whose identity belongs to the analysis rather than a global
+alevin-fry installation. Keep reusable authorized inputs in a site-controlled
+read-only directory and expose only the required path.
+
+| Capability | Docker | Podman | Apptainer | Boundary |
+| --- | --- | --- | --- | --- |
+| Ordinary working-directory I/O | `TAFFISH_CONTAINER_BACKEND=docker taf-alevin-fry ...` | `TAFFISH_CONTAINER_BACKEND=podman taf-alevin-fry ...` | `TAFFISH_CONTAINER_BACKEND=apptainer taf-alevin-fry ...` | The wrapper exposes the current working directory. |
+| External read-only input | `TAFFISH_DOCKER_RUN_ARGS="-v /host/data:/data:ro"` | `TAFFISH_PODMAN_RUN_ARGS="-v /host/data:/data:ro"` | `TAFFISH_APPTAINER_RUN_ARGS="--bind /host/data:/data:ro"` | Site/run policy; change both paths to real absolute paths. |
+
+The upstream crate provides one CPU command-line executable. Its package,
+dependency, source-entry-point and companion-project audit found no official
+optional GUI, browser service, GPU or device interface to add here. Simpleaf
+is the official higher-level workflow companion and remains a separate
+TAFFISH app; downstream QC/report packages remain separate runtimes as well.
+
+## Upstream `v0.18.1` Changes And Behaviors
+
+Version 0.18.1 is an output-neutral performance update over 0.18.0. It reuses
+per-worker scratch buffers in Cell Ranger-like quantification, reads RAD input
+through a 4 MiB buffer, uses the fixed-u64 map for collation byte accounting,
+and buffers JSON metadata reads. It also updates `libradicl` to 0.18.1. The
+public CLI, output formats, resource model and supported platforms are
+unchanged.
 
 - Barcode correction is deterministic across whitelist order, hash iteration,
   worker completion order and thread count. Cell policies are `unique` and
@@ -307,12 +332,26 @@ help. A full ATAC scientific run is not in the fast suite because it requires
 mapper-specific ATAC RAD input; smoke fixtures validate packaging behavior,
 not biological accuracy on production data.
 
+When an upstream stage fails, the helper names its log-backed stage, preserves
+the original exit status and prints only the final 200 log lines so Index
+diagnostics remain useful and bounded.
+
+Both declared native architectures passed the complete Docker and Podman
+functional matrices. The actual read-only Apptainer SIF, exact smoke matrix,
+wrapper and bind semantics were validated natively on `linux/amd64`. Native
+`linux/arm64` Apptainer was not separately exercised: the wrapper has no
+backend-specific runtime arguments or architecture-coupled mount behavior,
+and the arm64 OCI runtime paths already passed independently. This low-risk
+unverified combination does not reduce the Apptainer backend result; the
+post-publication Index Action remains the feedback path for a combination-
+specific failure, which would be fixed in a new immutable release.
+
 ## Documentation, License, And Citation
 
 - [Upstream repository](https://github.com/COMBINE-lab/alevin-fry)
 - [Alevin-fry documentation](https://alevin-fry.readthedocs.io/en/latest/)
 - [Official tutorials](https://combine-lab.github.io/alevin-fry-tutorials/)
-- [Release `v0.18.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.0)
+- [Release `v0.18.1`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.1)
 
 TAFFISH packaging code and documentation use Apache-2.0. The bundled upstream
 binary and notices remain BSD-3-Clause.
