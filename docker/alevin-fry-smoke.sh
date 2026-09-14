@@ -2,11 +2,16 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.18.1
+EXPECTED_VERSION=0.18.2
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
 mkdir -p "$TMP_ROOT"
+SESSION=$(mktemp -d "${TMP_ROOT%/}/taf-alevin-fry.XXXXXX")
+trap 'rm -rf "$SESSION"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+TMP_ROOT=$SESSION
 
 fail() {
     printf 'alevin-fry smoke: %s\n' "$*" >&2
@@ -36,7 +41,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=afa67499c59503d0996a0fbf8cf85cc3c45999a6" \
+    grep -Fx "upstream_commit=86dd6957aeb002725173bd257bf45ad034129a67" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -104,7 +109,6 @@ interfaces_check() {
 
 tiny_cell_check() {
     work="${TMP_ROOT%/}/taf-alevin-fry-tiny-$$"
-    rm -rf "$work"
     mkdir -p "$work/map"
     make_small_sam "$work/reads.sam"
     run_logged "$work/convert.log" \
@@ -176,7 +180,6 @@ make_large_sam() {
 
 rad_check() {
     work="${TMP_ROOT%/}/taf-alevin-fry-rad-$$"
-    rm -rf "$work"
     mkdir -p "$work/map"
     make_small_sam "$work/reads.sam"
     run_logged "$work/convert.log" \
@@ -192,7 +195,6 @@ rad_check() {
 
 rna_check() {
     work="${TMP_ROOT%/}/taf-alevin-fry-rna-$$"
-    rm -rf "$work"
     mkdir -p "$work/map"
     make_large_sam "$work/reads.sam"
     run_logged "$work/convert.log" \
@@ -236,7 +238,7 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.18.1"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.18.2"' "$work/quant/quant.json" >/dev/null
     run_logged "$work/infer-from-quant.log" \
         "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
             -e "$work/quant/alevin/gene_eqclass.txt.gz" \
@@ -253,7 +255,6 @@ rna_check() {
 
 infer_check() {
     work="${TMP_ROOT%/}/taf-alevin-fry-infer-$$"
-    rm -rf "$work"
     mkdir -p "$work/input"
     cat >"$work/input/geqc_counts.mtx" <<'EOF'
 %%MatrixMarket matrix coordinate integer general
@@ -277,6 +278,115 @@ EOF
     grep -Fx 'geneB' "$work/output/quants_mat_cols.txt" >/dev/null
     grep -F '1 2 2' "$work/output/quants_mat.mtx" >/dev/null
     rm -rf "$work"
+}
+
+check_matrix() {
+    matrix=$1
+    rows=$2
+    cols=$3
+    awk -v rows="$rows" -v cols="$cols" '
+        /^%/ {next}
+        !header {if (NF!=3 || $1!=rows || $2!=cols || $3<0) exit 1;
+                 expected=$3; header=1; next}
+        {if (NF!=3 || $1<1 || $1>rows || $2<1 || $2>cols ||
+             $1!=int($1) || $2!=int($2) ||
+             $3 !~ /^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/) exit 1;
+         key=$1 SUBSEP $2; if (seen[key]++) exit 1; entries++}
+        END {if (!header || entries!=expected) exit 1}
+    ' "$matrix" || fail "invalid streamed matrix: $matrix"
+}
+
+streaming_check() {
+    work="$TMP_ROOT/streaming"
+    mkdir -p "$work/map"
+    make_small_sam "$work/reads.sam"
+    run_logged "$work/convert.log" "$AF" convert \
+        -b "$work/reads.sam" -o "$work/map/map.rad" -t 2
+    printf 'AAAAAAAAAAAAAAAA\n' >"$work/barcodes.txt"
+    run_logged "$work/permit.log" "$AF" generate-permit-list \
+        -i "$work/map" -d fw -o "$work/permit" -u "$work/barcodes.txt" -m 1 -t 2
+    run_logged "$work/collate.log" "$AF" collate \
+        -i "$work/permit" -r "$work/map" -t 2 --memory-limit 256MiB --compress
+    printf 'tx1\tgeneA\ntx2\tgeneA\n' >"$work/t2g.tsv"
+    for bootstrap_mode in summary replicates; do
+        if [ "$bootstrap_mode" = summary ]; then set -- --summary-stat; else set --; fi
+        out="$work/$bootstrap_mode"
+        run_logged "$out.log" "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
+            -o "$out" -r cr-like-em -t 2 --use-mtx --small-thresh 0 --num-bootstraps 3 "$@"
+        for name in quants_mat bootstraps_mean bootstraps_var; do
+            check_matrix "$out/alevin/$name.mtx" 1 1
+        done
+        grep -F 'wrote streamed count matrix' "$out.log" >/dev/null
+        test -s "$out/quant.json"
+        # One-gene resampling is deterministic; bypass the tiny-cell shortcut.
+        cmp "$out/alevin/quants_mat.mtx" "$out/alevin/bootstraps_mean.mtx"
+        awk '!/^%/ {n++; if(n==1 && $3!=0) exit 1; if(n>1) exit 1}' \
+            "$out/alevin/bootstraps_var.mtx"
+        awk '!/^%/ {n++; if(n>1) sum+=$3} END {if(sum!=5) exit 1}' \
+            "$out/alevin/quants_mat.mtx"
+    done
+    grep -F 'Full per-replicate MTX output is not supported' "$work/replicates.log" >/dev/null
+    printf 'tx1\tgeneA\tS\ntx2\tgeneA\tU\n' >"$work/usa.tsv"
+    run_logged "$work/usa.log" "$AF" quant -i "$work/permit" -m "$work/usa.tsv" \
+        -o "$work/usa" -r cr-like -t 2 --use-mtx
+    check_matrix "$work/usa/alevin/quants_mat.mtx" 1 3
+    grep -Fx geneA-U "$work/usa/alevin/quants_mat_cols.txt" >/dev/null
+    grep -Fx geneA-A "$work/usa/alevin/quants_mat_cols.txt" >/dev/null
+    test -s "$work/usa/quant.json"
+
+    # Portable output-create failure: a directory cannot be a matrix file.
+    mkdir -p "$work/blocked/alevin/quants_mat.mtx"
+    if "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
+        -o "$work/blocked" -r cr-like-em -t 2 --use-mtx >"$work/blocked.log" 2>&1; then
+        fail "an invalid matrix destination was incorrectly accepted"
+    fi
+    grep -F 'could not create' "$work/blocked.log" >/dev/null || {
+        tail -n 200 "$work/blocked.log" >&2; fail "missing create-error diagnostic";
+    }
+    test ! -e "$work/blocked/quant.json"
+
+    # Minimal contained /dev (e.g. Apptainer Index) may omit /dev/full.
+    # Never follow a dangling symlink and accidentally create a regular file.
+    if [ ! -c /dev/full ]; then
+        printf 'full-device fault probe unavailable: no /dev/full character device; output-create failure checked\n'
+        return
+    fi
+    # Additional late-write fault when the backend exposes the real device.
+    mkdir -p "$work/full/alevin"
+    ln -s /dev/full "$work/full/alevin/quants_mat.mtx"
+    if "$AF" quant -i "$work/permit" -m "$work/t2g.tsv" \
+        -o "$work/full" -r cr-like-em -t 2 --use-mtx >"$work/full.log" 2>&1; then
+        fail "a full output device was incorrectly accepted"
+    fi
+    grep -E 'could not (finalize|write)|No space left' "$work/full.log" >/dev/null || {
+        tail -n 200 "$work/full.log" >&2; fail "missing output-error diagnostic";
+    }
+    test ! -e "$work/full/quant.json"
+}
+
+allowlist_check() {
+    work="$TMP_ROOT/allowlist"
+    mkdir -p "$work/root"
+    printf 'AAAAAAAAAAAAAAAA\nCCCCCCCCCCCCCCCC\n' > "$work/list.txt"
+    printf 'Synthetic engineering fixture; CC0-1.0. Not vendor data.\n' > "$work/LICENSE"
+    sum=$(sha256sum "$work/list.txt" | awk '{print $1}')
+    set -- prepare --resource-root "$work/root" --id local-test-v1 \
+        --file "$work/list.txt" --sha256 "$sum" --license-file "$work/LICENSE" \
+        --source urn:taffish:synthetic-allowlist-v1 --rights-reviewed --group-readable
+    run_logged "$work/dry-run.log" alevin-fry-allowlist "$@" --dry-run
+    test ! -e "$work/root/local-test-v1"
+    run_logged "$work/prepare.log" alevin-fry-allowlist "$@"
+    run_logged "$work/again.log" alevin-fry-allowlist "$@"
+    grep -F 'already complete' "$work/again.log" >/dev/null
+    run_logged "$work/verify.log" alevin-fry-allowlist verify \
+        --resource-root "$work/root" --id local-test-v1 --sha256 "$sum"
+    test "$(stat -c %a "$work/root/local-test-v1")" = 750
+    test "$(stat -c %a "$work/root/local-test-v1/allowlist.txt")" = 640
+    printf 'G\n' >> "$work/root/local-test-v1/allowlist.txt"
+    if alevin-fry-allowlist verify --resource-root "$work/root" --id local-test-v1 > "$work/corrupt.log" 2>&1; then
+        fail 'corrupt allowlist was accepted'
+    fi
+    grep -F 'checksum mismatch' "$work/corrupt.log" >/dev/null
 }
 
 case "$MODE" in
@@ -303,8 +413,14 @@ case "$MODE" in
     infer)
         infer_check
         ;;
+    streaming)
+        streaming_check
+        ;;
+    allowlist)
+        allowlist_check
+        ;;
     *)
-        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer} [tmp-root]"
+        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer|streaming|allowlist} [tmp-root]"
         ;;
 esac
 

@@ -1,15 +1,15 @@
-ARG ALEVIN_FRY_VERSION=0.18.1
-ARG ALEVIN_FRY_TAG=v0.18.1
-ARG ALEVIN_FRY_COMMIT=afa67499c59503d0996a0fbf8cf85cc3c45999a6
-ARG ALEVIN_FRY_AMD64_SHA256=8dc94acdc3f5e20723dd5c11460c4bf3066d0f7cc8c8cd54460c08cb24d2e5c4
-ARG ALEVIN_FRY_ARM64_SHA256=bfb25069cfdf46f1a53703ca3fc767afdbaffc7b155d08d536ca60b42544e4b6
+ARG ALEVIN_FRY_VERSION=0.18.2
+ARG ALEVIN_FRY_TAG=v0.18.2
+ARG ALEVIN_FRY_COMMIT=86dd6957aeb002725173bd257bf45ad034129a67
+ARG ALEVIN_FRY_AMD64_SHA256=6a90ff4e737aedb24bb3bb407c60ec60c45cf7b3e5a17c169ee05c6a634da203
+ARG ALEVIN_FRY_ARM64_SHA256=882522945e61c0c52067cad0fabb3393a96c7296fae2b05582f4963bf5002452
 ARG DEBIAN_BASE_DIGEST=sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
-ARG BUILDARCH
 
 FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS fetch
 
 ARG TARGETARCH
 ARG BUILDARCH
+ARG BUILDPLATFORM
 ARG ALEVIN_FRY_VERSION
 ARG ALEVIN_FRY_TAG
 ARG ALEVIN_FRY_COMMIT
@@ -37,6 +37,7 @@ RUN set -eux; \
 WORKDIR /tmp/alevin-fry-build
 
 RUN set -eux; \
+    BUILDARCH="${BUILDARCH:-${BUILDPLATFORM#linux/}}"; \
     case "${TARGETARCH}" in \
       amd64) \
         asset_arch="x86_64"; \
@@ -92,6 +93,7 @@ FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e74
 ARG ALEVIN_FRY_VERSION
 ARG TARGETARCH
 ARG BUILDARCH
+ARG BUILDPLATFORM
 
 LABEL org.opencontainers.image.title="alevin-fry" \
       org.opencontainers.image.description="TAFFISH wrapper for alevin-fry single-cell RNA-seq and ATAC-seq RAD processing" \
@@ -102,10 +104,14 @@ ENV PATH=/opt/alevin-fry/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 
 COPY --from=fetch /opt/alevin-fry /opt/alevin-fry
 COPY docker/alevin-fry-smoke.sh /opt/alevin-fry/share/testdata/alevin-fry-smoke.sh
+COPY docker/alevin-fry-allowlist.sh /opt/alevin-fry/bin/alevin-fry-allowlist
 
 RUN set -eux; \
+    BUILDARCH="${BUILDARCH:-${BUILDPLATFORM#linux/}}"; \
     ln -s /opt/alevin-fry/bin/alevin-fry /usr/local/bin/alevin-fry; \
     chmod 0755 /opt/alevin-fry/share/testdata/alevin-fry-smoke.sh; \
+    chmod 0755 /opt/alevin-fry/bin/alevin-fry-allowlist; \
+    sh -n /opt/alevin-fry/bin/alevin-fry-allowlist; \
     if [ "${BUILDARCH}" = "${TARGETARCH}" ]; then \
       alevin-fry --version 2>&1 | grep -Fx "alevin-fry ${ALEVIN_FRY_VERSION}" >/dev/null; \
       alevin-fry --help 2>&1 | grep -F "Process RAD files from the command line" >/dev/null; \
