@@ -2,7 +2,7 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.18.2
+EXPECTED_VERSION=0.18.3
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
@@ -41,7 +41,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=86dd6957aeb002725173bd257bf45ad034129a67" \
+    grep -Fx "upstream_commit=ad05742d274230f9141b2eabeebd1c1b31692199" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -220,7 +220,9 @@ rna_check() {
     run_logged "$work/collate.log" \
         "$AF" collate -i "$work/permit" -r "$work/map" \
             -t 2 --memory-limit 256MiB --compress
-    test -s "$work/permit/map.collated.rad.sz"
+    test -s "$work/permit/map.collated.rad"
+    test -s "$work/permit/map.collated.rad.chunkidx"
+    grep -F '"chunk_codec": "lz4"' "$work/permit/collate.json" >/dev/null
     test -s "$work/permit/collate.json"
     printf 'tx1\tgeneA\ntx2\tgeneB\n' >"$work/t2g.tsv"
     run_logged "$work/quant.log" \
@@ -238,7 +240,7 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.18.2"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.18.3"' "$work/quant/quant.json" >/dev/null
     run_logged "$work/infer-from-quant.log" \
         "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
             -e "$work/quant/alevin/gene_eqclass.txt.gz" \
@@ -364,6 +366,81 @@ streaming_check() {
     test ! -e "$work/full/quant.json"
 }
 
+chunk_codec_check() {
+    work="$TMP_ROOT/chunks"
+    mkdir -p "$work/map"
+    # Eight synthetic cells produce enough chunks for several reader ranges.
+    printf '@HD\tVN:1.6\tSO:queryname\n@SQ\tSN:tx1\tLN:100\n' > "$work/reads.sam"
+    : > "$work/barcodes.txt"
+    cell=0
+    for bc in AAAAAAAAAAAAAAAA CCCCCCCCCCCCCCCC GGGGGGGGGGGGGGGG TTTTTTTTTTTTTTTT \
+        ACACACACACACACAC CACACACACACACACA GTGTGTGTGTGTGTGT TGTGTGTGTGTGTGTG; do
+        cell=$((cell + 1))
+        printf '%s\n' "$bc" >> "$work/barcodes.txt"
+        record=0
+        for umi in AAAAAAAAAAAA CCCCCCCCCCCC GGGGGGGGGGGG TTTTTTTTTTTT; do
+            record=$((record + 1))
+            printf 'c%s_r%s\t0\ttx1\t1\t60\t20M\t*\t0\t0\tACGTACGTACGTACGTACGT\tIIIIIIIIIIIIIIIIIIII\tCR:Z:%s\tUR:Z:%s\n' \
+                "$cell" "$record" "$bc" "$umi" >> "$work/reads.sam"
+        done
+    done
+    printf 'tx1\tgeneA\n' > "$work/t2g.tsv"
+    run_logged "$work/convert.log" "$AF" convert -b "$work/reads.sam" -o "$work/map/map.rad" -t 2
+    for codec in none lz4; do
+        permit="$work/$codec"
+        run_logged "$work/permit-$codec.log" "$AF" generate-permit-list \
+            -i "$work/map" -d fw -o "$permit" -u "$work/barcodes.txt" -m 1 -t 2
+        if [ "$codec" = none ]; then set --; else set -- --compress lz4; fi
+        run_logged "$work/collate-$codec.log" "$AF" collate \
+            -i "$permit" -r "$work/map" -t 2 --memory-limit 256MiB "$@"
+        test -s "$permit/map.collated.rad"
+        test ! -e "$permit/map.collated.rad.sz"
+        idx="$permit/map.collated.rad.chunkidx"
+        test -s "$idx"
+        offsets=$(od -An -v -tu8 "$idx")
+        printf '%s\n' "$offsets" | awk -v bytes="$(wc -c < "$permit/map.collated.rad")" '
+            {for(i=1;i<=NF;i++) a[++n]=$i}
+            END {if(a[1]!=8 || n!=10 || a[n]!=bytes) exit 1;
+                 for(i=3;i<=n;i++) if(a[i]<=a[i-1]) exit 1}' || fail 'invalid chunk offsets'
+        for readers in 1 4; do
+            out="$work/$codec-r$readers"
+            run_logged "$out.log" env AF_RAD_READERS="$readers" "$AF" quant \
+                -i "$permit" -m "$work/t2g.tsv" -o "$out" -r cr-like \
+                -t 4 --small-thresh 0 --use-mtx
+            check_matrix "$out/alevin/quants_mat.mtx" 8 1
+            awk '!/^%/ {n++; if(n>1 && $3!=4) bad=1} END {exit(bad || n!=9)}' "$out/alevin/quants_mat.mtx"
+            grep -Fx geneA "$out/alevin/quants_mat_cols.txt" >/dev/null
+            LC_ALL=C sort "$out/alevin/quants_mat_rows.txt" > "$out/rows.sorted"
+            LC_ALL=C sort "$work/barcodes.txt" > "$work/expected.sorted"
+            cmp "$work/expected.sorted" "$out/rows.sorted"
+            if [ "$readers" = 4 ]; then
+                grep -F "parallel RAD reader: 4 readers over 8 chunks (codec: $codec)" "$out.log" >/dev/null
+            elif grep -F 'parallel RAD reader:' "$out.log" >/dev/null; then
+                fail 'single reader override was ignored'
+            fi
+        done
+        # An absent or truncated optional index must fall back without changing counts.
+        cp "$idx" "$work/$codec-valid.chunkidx"
+        for state in missing truncated; do
+            if [ "$state" = missing ]; then rm "$idx"; else printf x > "$idx"; fi
+            out="$work/$codec-$state"
+            run_logged "$out.log" "$AF" quant -i "$permit" -m "$work/t2g.tsv" \
+                -o "$out" -r cr-like -t 4 --small-thresh 0 --use-mtx
+            check_matrix "$out/alevin/quants_mat.mtx" 8 1
+            awk '!/^%/ {n++; if(n>1 && $3!=4) bad=1} END {exit(bad || n!=9)}' "$out/alevin/quants_mat.mtx"
+            if [ "$state" = truncated ]; then
+                grep -F 'using the single reader' "$out.log" >/dev/null
+            fi
+        done
+        cp "$work/$codec-valid.chunkidx" "$idx"
+    done
+    # The official release uses the default build without the optional zstd feature.
+    if "$AF" collate -i "$work/none" -r "$work/map" -t 2 --compress zstd > "$work/zstd.log" 2>&1; then
+        fail 'official zstd feature boundary changed; reassess rather than claiming unsupported'
+    fi
+    grep -F 'zstd compression requires' "$work/zstd.log" >/dev/null
+}
+
 allowlist_check() {
     work="$TMP_ROOT/allowlist"
     mkdir -p "$work/root"
@@ -416,11 +493,14 @@ case "$MODE" in
     streaming)
         streaming_check
         ;;
+    chunks)
+        chunk_codec_check
+        ;;
     allowlist)
         allowlist_check
         ;;
     *)
-        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer|streaming|allowlist} [tmp-root]"
+        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer|streaming|chunks|allowlist} [tmp-root]"
         ;;
 esac
 

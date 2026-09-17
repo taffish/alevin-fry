@@ -1,4 +1,4 @@
-alevin-fry 0.18.2-r1
+alevin-fry 0.18.3-r1
 
 Purpose:
   Process compatible RAD mappings into permit lists, collated records and counts.
@@ -26,10 +26,13 @@ Inputs and controls:
   --memory-limit SIZE and --tmp-dir DIR: bound memory and choose writable GPL scratch.
   --dump-eqclasses: emit matrix/archive inputs for infer; keep the label files.
   collate writes into the permit-list directory, not a separate output directory.
+  --compress [lz4]: per-chunk LZ4 in .rad; zstd is unavailable in official binaries.
+  To force one RAD reader: taf-alevin-fry env AF_RAD_READERS=1 alevin-fry quant ...
 
 Key outputs:
   permit_map.bin, permit_freq.bin, correction_plan.bin, generate_permit_list.json
-  map.collated.rad[.sz], collate.json, alevin/quants_mat.mtx, row/column labels, quant.json
+  map.collated.rad and optional .chunkidx, collate.json, alevin/quants_mat.mtx and labels
+  quant.json: success metadata. Older whole-file .rad.sz input remains readable.
 
 Prepare an authorized reusable allowlist:
   Technology-wide allowlists are not sample-filtered -b lists. No vendor data is bundled.
@@ -69,7 +72,8 @@ Immediate notes:
   The amd64 image requires x86-64-v3/AVX2; Arm hosts should use native arm64.
   CPU-only; no model is required. FASTQ mapping/reference construction are separate steps.
   Full ATAC processing requires mapper-compatible scATAC RAD input.
-  Use a fresh quant output directory: failed streaming may leave partial matrices.
+  Use fresh permit and quant directories; never mix new .rad with an old .rad.sz.
+  Failed streaming may leave partial matrices.
   Check the exit code; an old quant.json is not a valid success signal for a rerun.
   Bootstraps export mean/variance MTX, not individual replicate matrices; --summary-stat
   requests summary computation. USA mode cannot use bootstraps. Add --small-thresh 0

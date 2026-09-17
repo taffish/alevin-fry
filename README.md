@@ -11,11 +11,11 @@ scATAC-seq RAD-processing interfaces.
 - Name: `alevin-fry`
 - Command: `taf-alevin-fry`
 - Kind: `tool`
-- TAFFISH version: `0.18.2-r1`
-- Container image: `ghcr.io/taffish/alevin-fry:0.18.2-r1`
-- Upstream release: [`v0.18.2`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.2)
-- Upstream commit: `86dd6957aeb002725173bd257bf45ad034129a67`
-- Runtime version: `alevin-fry 0.18.2`
+- TAFFISH version: `0.18.3-r1`
+- Container image: `ghcr.io/taffish/alevin-fry:0.18.3-r1`
+- Upstream release: [`v0.18.3`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.3)
+- Upstream commit: `ad05742d274230f9141b2eabeebd1c1b31692199`
+- Runtime version: `alevin-fry 0.18.3`
 - Native platforms: `linux/amd64`, `linux/arm64`
 - TAFFISH app license: `Apache-2.0`
 - Upstream license: `BSD-3-Clause`
@@ -25,8 +25,8 @@ release archives are pinned by SHA256:
 
 | Platform | Release asset SHA256 |
 | --- | --- |
-| `linux/amd64` | `6a90ff4e737aedb24bb3bb407c60ec60c45cf7b3e5a17c169ee05c6a634da203` |
-| `linux/arm64` | `882522945e61c0c52067cad0fabb3393a96c7296fae2b05582f4963bf5002452` |
+| `linux/amd64` | `8f0d1d61643f8224b4267fffc106eee8639cedd7e66c5776d15ec6a25806d652` |
+| `linux/arm64` | `e00184a2417706cfb4ff906bbf3b42a8e1beca4272f9983dbf8c8328176bf7b8` |
 
 ## Installation
 
@@ -39,7 +39,7 @@ For local validation before publication, use `taf install --from .` in this app 
 
 ## Scope
 
-This app exposes the upstream `v0.18.2` command surface:
+This app exposes the upstream `v0.18.3` command surface:
 
 - `generate-permit-list` with knee, expected-cell, forced-cell, explicit and
   unfiltered barcode-list modes
@@ -50,6 +50,7 @@ This app exposes the upstream `v0.18.2` command surface:
 - a versioned `correction_plan.bin` handoff consumed by collation and ATAC
   sorting, with explicit compatibility fallback for older GPL output
 - bounded, optionally compressed `collate` processing with `--memory-limit`
+- per-chunk LZ4 collation, chunk-offset indexes and automatic parallel RAD reading
 - `quant` with trivial, Cell Ranger-like, parsimony and EM resolutions
 - explicit `--small-thresh` control and JSON provenance for the tiny-cell
   winner-take-all optimization
@@ -134,6 +135,26 @@ taf-alevin-fry alevin-fry quant \
 `collate.json` into the permit-list directory. Use `--memory-limit 2GiB` (or
 another explicit byte size) to bound its buffer budget; `--max-records` is a
 hidden compatibility option rather than the recommended resource control.
+
+Since 0.18.3, `--compress` (or `--compress lz4`) produces per-chunk LZ4
+compression inside `map.collated.rad`; omitting it produces uncompressed RAD.
+Both forms can have an adjacent `map.collated.rad.chunkidx`. Quantification
+automatically uses the index for parallel reading; an absent, truncated or
+stale index falls back to the single reader. Keep the RAD and its matching
+index together. To explicitly select the single reader in any backend:
+
+```sh
+taf-alevin-fry env AF_RAD_READERS=1 alevin-fry quant \
+  -i af-permit -m transcript-to-gene.tsv -o af-quant-serial \
+  -r cr-like-em -t 8 --use-mtx
+```
+
+Older whole-file Snappy `map.collated.rad.sz` remains readable, but is not
+seekable by the new parallel reader. Use a fresh permit directory rather
+than mixing new `.rad` output and a stale `.rad.sz`: the legacy file takes
+precedence when both exist. `--compress zstd` requires upstream's optional
+`zstd` build feature, which the official binaries packaged here do not enable;
+use LZ4 or uncompressed output. This app does not alter upstream build features.
 
 To dump and then re-infer gene equivalence classes, first add
 `--dump-eqclasses` to `quant`, then pass its outputs directly to `infer`:
@@ -240,7 +261,8 @@ provisional and explicitly identifies `generate-permit-list` followed by
 | `permit_map.bin`, `permit_freq.bin` | Compatibility map and corrected aggregate frequencies |
 | `correction_plan.bin` | Versioned internal GPL-to-collate/ATAC correction handoff |
 | `generate_permit_list.json` | Resolved correction policy and diagnostic counts |
-| `map.collated.rad[.sz]` | Cell-barcode-collated RAD records |
+| `map.collated.rad` | Uncompressed or per-chunk LZ4 collated records; older whole-file `.rad.sz` remains accepted as input |
+| `map.collated.rad.chunkidx` | Optional matching chunk-offset index for parallel quantification |
 | `quants_mat.mtx` | Cell-by-feature Matrix Market count matrix |
 | `quants_mat_rows.txt` | Cell barcode labels |
 | `quants_mat_cols.txt` | Gene or feature labels |
@@ -248,7 +270,7 @@ provisional and explicitly identifies `generate-permit-list` followed by
 | ATAC BED output | Coordinate-sorted, deduplicated fragments from `atac sort` |
 
 Keep the JSON metadata and label files with each matrix. Use a fresh, writable
-output directory for every run. Version 0.18.2 streams matrix entries and
+output directory for every run. Since 0.18.2, quantification streams matrix entries and
 finalizes their headers only after successful processing. An interrupted or
 failed run may leave partial outputs; it does not write new success metadata,
 but a pre-existing `quant.json` is not a valid success signal for a rerun.
@@ -328,7 +350,7 @@ import path, not to the reusable-resource classification. Failed staging is
 removed; a stale lock after an uncatchable process kill requires administrator
 inspection before removal. No other user's lock is automatically broken.
 
-Recommended roots (resource ID is a technology/source revision, not 0.18.2):
+Recommended roots (resource ID is a technology/source revision, not 0.18.3):
 
 - Personal: `~/.local/share/taffish/resources/alevin-fry/<ID>/`
 - Site: `/usr/local/share/taffish/resources/alevin-fry/<ID>/`
@@ -426,18 +448,26 @@ separate installation for downstream QC. No GUI-completeness claim is made
 for the broader ecosystem. Simpleaf remains the separate TAFFISH workflow
 and registry-management app.
 
-## Upstream `v0.18.2` Changes And Behaviors
+## Upstream `v0.18.3` Changes And Behaviors
 
-Version 0.18.2 streams quantification and bootstrap mean/variance matrices
-instead of accumulating a whole sparse matrix in memory. Bounded worker
-batches and 256 KiB buffers reduce output locking and writes. Barcode and
-feature output are buffered as well. Matrix dimensions, coordinates and
-nonzero counts are validated; buffered writes and final header failures
-propagate as errors, workers are joined, and failed processing does not
-produce new success metadata. The public CLI, successful output contracts,
-resource model and supported platforms are retained. `libradicl` remains
-0.18.1. Upstream's production performance measurements are not packaging
-benchmarks performed by this app.
+The tag-to-tag source comparison, rather than the bundled changelog (which
+still ends at 0.18.2), identifies this release's changes:
+
+- Multi-sample barcode-correction concurrency is bounded by the effective
+  memory budget, sample histogram sizes, sample count and requested threads,
+  replacing the previous hard cap of four sample workers.
+- Collation writes a chunk-offset sidecar for seekable RAD output. Quantification
+  uses parallel readers when a valid sidecar is present; `AF_RAD_READERS=1`
+  selects the single-reader path. Default reader count is four.
+- `--compress [CODEC]` selects per-chunk LZ4 by default. Optional zstd requires
+  a separately compiled upstream feature and is not enabled in these official
+  release binaries. Legacy whole-file Snappy input remains supported.
+- The locked `libradicl` dependency advances to 0.19.1. No new external
+  runtime helper, downloader, GUI, GPU or reference/model requirement is added.
+
+Streaming matrices and their write-error handling from 0.18.2 are retained.
+Upstream's production performance measurements are not packaging benchmarks
+performed by this app.
 
 - Barcode correction is deterministic across whitelist order, hash iteration,
   worker completion order and thread count. Cell policies are `unique` and
@@ -472,6 +502,8 @@ The independent offline smoke suite checks:
 - top-level help plus all public RNA interfaces and the supported ATAC surface
 - real SAM-to-RAD conversion and RAD record inspection
 - permit-list generation, compressed collation and parsimony quantification
+- uncompressed/LZ4 chunk offsets, 1/4-reader count equality, missing/truncated
+  index fallback and the official disabled-zstd boundary
 - frequency correction of a real one-mismatch barcode, exact correction
   diagnostics and the versioned correction-plan handoff
 - Matrix Market labels, JSON metadata and non-empty equivalence-class dumps
@@ -494,53 +526,66 @@ When an upstream stage fails, the helper names its log-backed stage, preserves
 the original exit status and prints only the final 200 log lines so Index
 diagnostics remain useful and bounded.
 
-The resource-preparation successor keeps the official alevin-fry binary and
-thin default entry point unchanged, but adds the offline helper and its smoke
-mode. The manifest now contains 25 command-existence probes and 8 independent
-tests. This requires fresh validation of the changed OCI, not reuse of the
-earlier CLI-only release-readiness conclusion.
+This release retains the previously introduced offline allowlist helper and
+adds independent chunk-codec/index regression coverage. The manifest contains
+28 command-existence probes and 9 independent tests. Current 0.18.3 candidate
+validation on 2026-09-14 passed the following checks; no older receipt substitutes
+for this candidate's validation:
 
-Current-candidate validation on 2026-09-12 passed all 231 exact invocations:
-native arm64 Docker normal/read-only (66), native amd64 Docker and Podman
-normal/read-only (132), and an actual read-only Apptainer SIF made from the
-same amd64 OCI (33). Each manifest command ran independently and offline.
-The four tested native/backend paths also passed 172 real-wrapper checks,
-covering persistent import, approved checksum, source/license inventory,
-dry-run, idempotence, lock/partial/corrupt rejection, permissions, read-only
-reuse and a real permit-list output. Earlier CLI-only receipts are preserved
-as history, not substituted for this changed container's evidence.
+| Native environment | Exact direct smoke | Real generated wrapper |
+| --- | --- | --- |
+| Linux ARM64 Docker VM | 37 normal + 37 read-only | 44 |
+| xjp Linux AMD64 Docker | 37 normal + 37 read-only | 44 |
+| xjp Linux AMD64 Podman | 37 normal + 37 read-only | 44 |
+| xjp Linux AMD64 Apptainer | 37 actual read-only SIF | 44 |
 
-A separate synthetic site test passed 18 checks plus 8 exact cleanup steps:
-container-root preparation produced host-visible root-owned resources,
-authorized-group permissions were 0750/0640, and an ordinary user verified
-and used the same member through Docker, Podman and actual Apptainer SIF.
-Writes were refused, including through an otherwise writable bind; a UID
-outside the authorized group could not read it. Resource bytes were unchanged.
-This proves the admin-once mechanism, not a production-site licensing decision.
-No host sudo, system configuration changes or real vendor data were used.
+All 259 direct checks run independently with networking disabled. The 176
+wrapper checks include ordinary-user execution, literal spaced/non-ASCII
+arguments, actual read-only input binds, persistent allowlist import, checksum
+and permission drift, lock/partial-state refusal and no corrupt overwrite.
+An additional administrator-once synthetic-resource scenario passes 18
+functional/permission checks across the three backends, plus 8 cleanup checks:
+authorized ordinary users can reuse the resource but cannot write it, while
+users outside the authorized group cannot read it. No host `sudo` or system
+installation is used; administrator ownership is tested through a controlled
+Docker bind of this task's synthetic files.
 
-Both native-platform and backend evidence axes pass. Native arm64 Podman and
-Apptainer are not separately validated; no untested cross combination is
-labeled PASS. No GPU, GUI, architecture-specific mount logic or new coupled
-backend option requires expanding these low-risk cross combinations.
+Both native images were built from the canonical Action's app-root context
+using `docker/Dockerfile`. AMD64 Docker/Podman use identical OCI configuration
+and layer identities; the actual SIF is derived from that OCI archive.
+The platform and backend coverage axes are both closed. ARM64 Podman and
+Apptainer are **not separately validated**; this thin CPU wrapper has no
+architecture-specific backend, GPU, service or mount coupling that requires
+those additional combinations. This does not claim every platform/backend
+combination was tested.
 
-Docker image inspect reports 81,092,354 bytes for amd64 and 103,262,084 bytes for arm64
-(19,894 bytes more per platform than the pre-helper images). The helper uses
-existing GNU/POSIX tools; no Python, compiler, package
-cache, production vendor allowlist, model or reference is added. Original
-upstream and Debian notices remain intact. No full vendor resource import,
-production/site licensing decision, full ATAC mapper chain or scientific
-performance validation is claimed.
+Final uncompressed image sizes are 81,181,016 bytes (AMD64) and 103,342,170 bytes
+(ARM64). The packaged executable/documents/helpers occupy about 6 MiB; most
+space is the pinned Debian runtime. The final stage contains no build tools,
+download archives or package-manager caches. Runtime libraries and their Debian
+notices, and the upstream BSD notice, are retained. Build-time checks use stable
+version/help/library and tiny conversion checks, not a pager, full rendered help,
+browser or complete multi-threaded regression suite.
+
+Production vendor resources, site licensing decisions, the full ATAC mapper
+chain, multi-sample memory/performance scaling and biological accuracy are
+outside packaging validation. Legacy whole-file Snappy compatibility is retained
+by the reviewed upstream source; the new runtime regression suite exercises the
+current uncompressed/LZ4 formats, not a production archive collection. These are
+local candidate results, not evidence of a published image or completed Index run.
 
 ## Documentation, License, And Citation
 
 - [Upstream repository](https://github.com/COMBINE-lab/alevin-fry)
 - [Alevin-fry documentation](https://alevin-fry.readthedocs.io/en/latest/)
 - [Official tutorials](https://combine-lab.github.io/alevin-fry-tutorials/)
-- [Release `v0.18.2`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.2)
+- [Release `v0.18.3`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.3)
 
 TAFFISH packaging code and documentation use Apache-2.0. The bundled upstream
-binary and notices remain BSD-3-Clause.
+binary and notices remain BSD-3-Clause. The upgraded libradicl dependency's
+original BSD notice is reproduced in the accompanying
+[THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES), from its fixed source commit;
+this does not grant rights to vendor barcode resources.
 
 Please cite:
 

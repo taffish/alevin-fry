@@ -1,0 +1,6 @@
+{
+  "artifact": "taf-alevin-fry-v0.18.3-r1",
+  "schema": "taffish.build/v1",
+  "source_sha256": "a40ffefdebfe349980390e14392e28849c356e09c07fc7b1fcb322efb439f4c9",
+  "wrapper_sha256": "544d126b2164703a69993c8feeaf1031273bc6e13e8be6eb60b0283668f61921"
+}
