@@ -70,9 +70,22 @@ verify() {
     [ "$(hash "$candidate/SHA256SUMS")" = "$(cat "$candidate/READY")" ] || die 'invalid READY inventory digest'
     (cd "$candidate" && sha256sum --status -c SHA256SUMS) || die 'resource checksum mismatch'
     awk -F '\t' -v id="$id" '
+         NF!=2 || seen[$1]++ {bad=1}
+         $1 !~ /^(schema|id|source|sha256|license_sha256|bytes|records_and_length|access|prepared_utc)$/ {bad=1}
          $1=="schema" && $2=="taffish.alevin-fry.allowlist.v1" {s++}
          $1=="id" && $2==id {i++}
-         END {exit(s!=1 || i!=1)}' "$candidate/resource.tsv" || die 'resource identity mismatch'
+         END {exit(bad || NR!=9 || s!=1 || i!=1)}' "$candidate/resource.tsv" || die 'resource identity mismatch'
+    for pair in "sha256 allowlist.txt" "license_sha256 LICENSE"; do
+        set -- $pair
+        [ "$(awk -F '\t' -v key="$1" '$1==key {print $2}' "$candidate/resource.tsv")" = "$(hash "$candidate/$2")" ] || die 'resource metadata checksum mismatch'
+    done
+    [ -s "$candidate/LICENSE" ] || die 'empty license notice'
+    recorded_bytes=$(awk -F '\t' '$1=="bytes" {print $2}' "$candidate/resource.tsv")
+    [ "$recorded_bytes" = "$(wc -c < "$candidate/allowlist.txt" | tr -d ' ')" ] || die 'resource byte count mismatch'
+    verified_stats=$(awk 'NF!=1 || $0 !~ /^[ACGTN]+$/ || length($0)>128 {bad=1}
+        NR==1 {n=length($0)} length($0)!=n {bad=1}
+        END {if(bad || NR==0) exit 1; print NR, n}' "$candidate/allowlist.txt") || die 'invalid resource barcodes'
+    [ "$verified_stats" = "$(awk -F '\t' '$1=="records_and_length" {print $2}' "$candidate/resource.tsv")" ] || die 'resource record count mismatch'
     scope=$(awk -F '\t' '$1=="access" {print $2}' "$candidate/resource.tsv")
     case "$scope" in personal) dmode=700; fmode=600;; authorized-group) dmode=750; fmode=640;; *) die 'invalid access scope';; esac
     [ "$(stat -c %a "$candidate")" = "$dmode" ] || die 'resource directory permissions drifted'
@@ -110,22 +123,34 @@ if [ "$group_read" -eq 1 ]; then dir_mode=750; file_mode=640; access=authorized-
 root_gid=$(stat -c %g "$root")
 printf 'id=%s source=%s sha256=%s bytes=%s records/length=%s access=%s group=%s\n' \
     "$id" "$source" "$expected" "$bytes" "$stats" "$access" "$root_gid"
+printf 'license_file=%s license_sha256=%s license_bytes=%s rights=operator-reviewed\n' \
+    "$notice" "$notice_sha" "$notice_bytes"
 if [ "$dry_run" -eq 1 ]; then
     printf 'dry-run: would verify/copy to %s; no files changed\n' "$final"
     exit 0
 fi
-stage= lock_owned=0
+stage= stage_identity= lock_identity= interrupted=0
 lock="$root/.$id.lock"
+identity() { stat -c '%d:%i' -- "$1"; }
 cleanup() {
-    if [ -n "$stage" ]; then rm -rf -- "$stage"; fi
-    if [ "$lock_owned" -eq 1 ]; then rmdir -- "$lock"; fi
+    # Only this transaction's unchanged endpoints belong to us. Never sweep
+    # old staging directories or follow a replaced endpoint outside the root.
+    if [ -n "$stage_identity" ] && [ -d "$stage" ] && [ ! -L "$stage" ] &&
+       [ "$(identity "$stage")" = "$stage_identity" ]; then rm -rf -- "$stage"; fi
+    if [ -n "$lock_identity" ] && [ -d "$lock" ] && [ ! -L "$lock" ] &&
+       [ "$(identity "$lock")" = "$lock_identity" ]; then rmdir -- "$lock"; fi
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+# Defer termination across endpoint creation and ownership capture. Otherwise a
+# signal between mkdir/mktemp and assignment can strand an unrecorded endpoint.
+trap 'interrupted=130' INT
+trap 'interrupted=143' TERM
 umask 077
 mkdir -- "$lock" 2>/dev/null || die 'resource locked or root not writable; do not remove another live import lock'
-lock_owned=1
+lock_identity=$(identity "$lock")
+[ "$interrupted" -eq 0 ] || exit "$interrupted"
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if [ -e "$final" ] || [ -L "$final" ]; then
     verify "$final"
     [ "$(hash "$final/LICENSE")" = "$notice_sha" ] || die 'existing ID has a different license notice'
@@ -134,7 +159,13 @@ if [ -e "$final" ] || [ -L "$final" ]; then
     printf 'already complete: %s (unchanged)\n' "$final"
     exit 0
 fi
+trap 'interrupted=130' INT
+trap 'interrupted=143' TERM
 stage=$(mktemp -d "$root/.$id.stage.XXXXXX")
+stage_identity=$(identity "$stage")
+[ "$interrupted" -eq 0 ] || exit "$interrupted"
+trap 'exit 130' INT
+trap 'exit 143' TERM
 cp -- "$input" "$stage/allowlist.txt"
 cp -- "$notice" "$stage/LICENSE"
 [ "$(hash "$stage/allowlist.txt")" = "$expected" ] || die 'source changed during copy'
@@ -152,5 +183,5 @@ chmod "$dir_mode" "$stage"
 verify "$stage"
 mv -T -n -- "$stage" "$final"
 [ ! -e "$stage" ] || die 'destination appeared during import; refusing overwrite'
-stage=
+stage= stage_identity=
 printf 'prepared: %s/allowlist.txt\n' "$final"

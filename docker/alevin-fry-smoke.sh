@@ -2,7 +2,7 @@
 set -eu
 
 AF=/opt/alevin-fry/bin/alevin-fry
-EXPECTED_VERSION=0.18.3
+EXPECTED_VERSION=0.19.0
 MODE=${1:-}
 TMP_ROOT=${2:-/tmp}
 
@@ -41,7 +41,7 @@ identity_check() {
     test -s /opt/alevin-fry/share/doc/alevin-fry/CHANGELOG.md
     grep -Fx "upstream_version=${EXPECTED_VERSION}" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
-    grep -Fx "upstream_commit=ad05742d274230f9141b2eabeebd1c1b31692199" \
+    grep -Fx "upstream_commit=1117219ec9cbd070293df0a329a37d9fc44be44a" \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
     grep -E '^target_arch=(amd64|arm64)$' \
         /opt/alevin-fry/share/doc/alevin-fry/source.txt >/dev/null
@@ -65,7 +65,7 @@ quick_interfaces_check() {
     check_help "Process RAD files from the command line"
     check_help "--cell-bc-correction" generate-permit-list
     check_help "--memory-limit" collate
-    check_help "--multi-sample-output" quant
+    check_help "--dump-molecules" quant
     check_help "--small-thresh" quant
     check_help "subcommand for processing scATAC-seq RAD files" atac
     rm -f "$help_file"
@@ -82,7 +82,7 @@ interfaces_check() {
     check_help "--memory-limit" generate-permit-list
     check_help "--tmp-dir" generate-permit-list
     check_help "--memory-limit" collate
-    check_help "--multi-sample-output" quant
+    check_help "--dump-molecules" quant
     check_help "--small-thresh" quant
     check_help "parsimony-gene-em" quant
     check_help "--count-mat" infer
@@ -240,7 +240,7 @@ rna_check() {
     grep -Fx 'geneB' "$work/quant/alevin/quants_mat_cols.txt" >/dev/null
     grep -F 'matrix coordinate real general' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
     grep -F '1 3 3' "$work/quant/alevin/geqc_counts.mtx" >/dev/null
-    grep -F '"version_str": "0.18.3"' "$work/quant/quant.json" >/dev/null
+    grep -F '"version_str": "0.19.0"' "$work/quant/quant.json" >/dev/null
     run_logged "$work/infer-from-quant.log" \
         "$AF" infer -c "$work/quant/alevin/geqc_counts.mtx" \
             -e "$work/quant/alevin/gene_eqclass.txt.gz" \
@@ -466,7 +466,52 @@ allowlist_check() {
     grep -F 'checksum mismatch' "$work/corrupt.log" >/dev/null
 }
 
+release019_check() {
+    work="$TMP_ROOT/release019"
+    mkdir -p "$work/map"
+    # Synthetic RAD v2 per libradicl 0.21 header/tag/record wire definitions:
+    # one cell, six distinct UMIs, two probes, role-only cell_bc/umi_tag names.
+    printf '%b' '\122\101\104\137\106\111\114\105\002\000\000\000\000\000\000\002\000\000\000\000\000\000\000\006\000\160\162\157\142\145\061\006\000\160\162\157\142\145\062\001\000\000\000\000\000\000\000\001\000\004\000\165\154\145\156\002\000\000\002\000\007\000\143\145\154\154\137\142\143\003\001\002\000\020\007\000\165\155\151\137\164\141\147\003\002\001\014\001\000\024\000\143\157\155\160\162\145\163\163\145\144\137\157\162\151\137\162\145\146\151\144\003\000\000\014\000\150\000\000\000\006\000\000\000\001\000\000\000\000\000\000\000\000\000\000\000\000\000\000\200\001\000\000\000\000\000\000\000\001\000\000\000\001\000\000\200\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\200\001\000\000\000\000\000\000\000\003\000\000\000\001\000\000\200\001\000\000\000\000\000\000\000\004\000\000\000\000\000\000\200\001\000\000\000\000\000\000\000\005\000\000\000\001\000\000\200' > "$work/map/map.rad"
+    run_logged "$work/view.log" "$AF" view -r "$work/map/map.rad" -H
+    grep -F 'CB:AAAAAAAAAAAAAAAA' "$work/view.log" >/dev/null
+    run_logged "$work/gpl.log" "$AF" generate-permit-list -i "$work/map" -d both -o "$work/permit" -f 1 -t 2
+    run_logged "$work/collate.log" "$AF" collate -i "$work/permit" -r "$work/map" -t 2 --compress
+    printf 'probe1\tgeneA\nprobe2\tgeneA\n' > "$work/probes.tsv"
+    run_logged "$work/probe.log" "$AF" quant-probe -i "$work/permit" -m "$work/probes.tsv" \
+        -o "$work/probe" -r cr-like-em -t 2 --small-thresh 0 --probe-mtx --dump-molecules
+    check_matrix "$work/probe/alevin/quants_mat.mtx" 1 1
+    check_matrix "$work/probe/alevin/probe_quants_mat.mtx" 1 2
+    awk '!/^%/ {n++; if(n>1) sum+=$3} END {if(sum!=6) exit 1}' "$work/probe/alevin/quants_mat.mtx"
+    for label in probe1 probe2; do grep -Fx "$label" "$work/probe/alevin/probe_quants_mat_cols.txt" >/dev/null; done
+    test -s "$work/probe/quant.json"
+    # PAR1 header and footer prove that a nonempty finalized Parquet was written.
+    file="$work/probe/alevin/molecules.parquet"
+    [ "$(od -An -N4 -tc "$file" | tr -d '[:space:]')" = PAR1 ]
+    [ "$(tail -c 4 "$file")" = PAR1 ]
+    run_logged "$work/umi.log" "$AF" quant -i "$work/permit" -m "$work/probes.tsv" \
+        -o "$work/umi" -r CR-LIKE -t 2 --umi-edit-dist 1 --dump-molecules
+    test -s "$work/umi/quant.json"
+    [ "$(tail -c 4 "$work/umi/alevin/molecules.parquet")" = PAR1 ]
+    # A 0.18 GPL must be refused, not silently used with a new collation.
+    cp "$work/permit/generate_permit_list.json" "$work/gpl-backup.json"
+    sed 's/0.19.0/0.18.3/g' "$work/gpl-backup.json" > "$work/permit/generate_permit_list.json"
+    if "$AF" collate -i "$work/permit" -r "$work/map" -t 2 > "$work/old-version.log" 2>&1; then
+        fail 'old major.minor permit output was accepted'
+    fi
+    grep -F 'on v0.18.3 results, please regenerate the results' "$work/old-version.log" >/dev/null
+    cp "$work/gpl-backup.json" "$work/permit/generate_permit_list.json"
+    # Invalid probe/USA combinations must fail without success metadata.
+    printf 'probe1\tgeneA\tS\nprobe2\tgeneA\tU\n' > "$work/usa.tsv"
+    if "$AF" quant-probe -i "$work/permit" -m "$work/usa.tsv" -o "$work/bad-probe" -r cr-like -t 2 > "$work/bad-probe.log" 2>&1; then
+        fail 'probe quantification accepted a USA map'
+    fi
+    test ! -e "$work/bad-probe/quant.json"
+}
+
 case "$MODE" in
+    release019)
+        release019_check
+        ;;
     buildtime)
         identity_check
         quick_interfaces_check
@@ -500,7 +545,7 @@ case "$MODE" in
         allowlist_check
         ;;
     *)
-        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer|streaming|chunks|allowlist} [tmp-root]"
+        fail "usage: $0 {buildtime|identity|interfaces|rad|rna|tiny|infer|streaming|chunks|allowlist|release019} [tmp-root]"
         ;;
 esac
 

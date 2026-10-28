@@ -4,18 +4,19 @@
 TAFFISH. Alevin-fry processes RAD mappings into barcode permit lists,
 collated records and single-cell or single-nucleus count matrices. The same
 binary also provides conversion, inspection, equivalence-class inference and
-scATAC-seq RAD-processing interfaces.
+scATAC-seq RAD-processing interfaces. The image additionally includes the
+independent upstream QCatch 0.2.14 QC/report application and an offline HTML packer.
 
 ## Package Identity
 
 - Name: `alevin-fry`
 - Command: `taf-alevin-fry`
 - Kind: `tool`
-- TAFFISH version: `0.18.3-r1`
-- Container image: `ghcr.io/taffish/alevin-fry:0.18.3-r1`
-- Upstream release: [`v0.18.3`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.3)
-- Upstream commit: `ad05742d274230f9141b2eabeebd1c1b31692199`
-- Runtime version: `alevin-fry 0.18.3`
+- TAFFISH version: `0.19.0-r1`
+- Container image: `ghcr.io/taffish/alevin-fry:0.19.0-r1`
+- Upstream release: [`v0.19.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.19.0)
+- Upstream commit: `1117219ec9cbd070293df0a329a37d9fc44be44a`
+- Runtime version: `alevin-fry 0.19.0`
 - Native platforms: `linux/amd64`, `linux/arm64`
 - TAFFISH app license: `Apache-2.0`
 - Upstream license: `BSD-3-Clause`
@@ -25,8 +26,8 @@ release archives are pinned by SHA256:
 
 | Platform | Release asset SHA256 |
 | --- | --- |
-| `linux/amd64` | `8f0d1d61643f8224b4267fffc106eee8639cedd7e66c5776d15ec6a25806d652` |
-| `linux/arm64` | `e00184a2417706cfb4ff906bbf3b42a8e1beca4272f9983dbf8c8328176bf7b8` |
+| `linux/amd64` | `fb3e5ea646f4582bf550a91f25c2d5446a26b40caca2fe04a96780760c11d52c` |
+| `linux/arm64` | `b17b48f6fb14f1d35f3c3be2edecc18153422face40f586c65234df05e15c2b3` |
 
 ## Installation
 
@@ -39,7 +40,7 @@ For local validation before publication, use `taf install --from .` in this app 
 
 ## Scope
 
-This app exposes the upstream `v0.18.3` command surface:
+This app exposes the upstream `v0.19.0` command surface:
 
 - `generate-permit-list` with knee, expected-cell, forced-cell, explicit and
   unfiltered barcode-list modes
@@ -57,7 +58,10 @@ This app exposes the upstream `v0.18.3` command surface:
 - standard gene-count and unspliced/spliced/ambiguous (USA) quantification
 - bootstraps, summary statistics, quantification subsets and equivalence-class
   dumps
-- separate, combined or both output layouts for multi-sample RAD input
+- one combined matrix for multi-sample RAD input, with `<sample>_<barcode>` rows
+- RAD v1 and role-annotated RAD v2 input
+- explicit `quant-probe` for probe-set references, optional probe matrix and
+  `--dump-molecules` Parquet output
 - `infer` directly from the real-valued equivalence-class matrix written by
   `quant --dump-eqclasses`, with integer-matrix backward compatibility
 - `convert` from queryname-grouped SAM/BAM with `CR` and `UR` tags to RAD
@@ -65,24 +69,29 @@ This app exposes the upstream `v0.18.3` command surface:
 - supported `atac generate-permit-list` and `atac sort` processing
 
 This app does not map FASTQ reads, build a transcriptome index, choose a
-chemistry, create a splici reference or perform downstream cell-level
-statistics. Those are separate workflow stages. QCatch is a distinct
-downstream package that produces an interactive HTML QC report; it is not part
-of the alevin-fry executable or this CLI image.
+chemistry or create a splici reference. QCatch is a separate downstream analysis
+stage, not an alevin-fry subcommand. Its native cell calling, optional doublet
+detection and dimensionality reduction are unchanged; their scientific choices
+remain the user's responsibility.
 
 ## Container Contents
 
 - `alevin-fry`: the official upstream Rust executable
 - upstream README, changelog and BSD-3-Clause license
 - release asset URL, checksum, commit and target-architecture provenance
-- checksum-pinned Debian 12 slim runtime base
+- checksum-pinned Python 3.11 / Debian Bookworm runtime base
+- QCatch 0.2.14 with architecture-specific hash-locked wheels; no host Python needed
+- `qcatch`: local-input guard plus the unmodified QCatch console program
+- `qcatch-offline`: explicit standalone copy of a native QCatch HTML report
+- `qcatch-gene-map`: rights-reviewed, checksum-verified local mapping import
 - deterministic offline smoke fixtures generated at runtime
 - `alevin-fry-allowlist`: offline, checksum-verified preparation of user-acquired
   technology allowlists; no downloader or automatic license acceptance
 
-The final image contains no compiler, Cargo cache, source tree, database,
-reference, model or package-manager cache. The upstream executable has no helper
-process or runtime network dependency.
+The final image contains no compiler, Cargo cache, build tree, database,
+reference, model or package-manager cache. QCatch's Python sources and complete
+source archive are retained for its license obligations. The alevin-fry executable
+has no helper process or runtime network dependency.
 
 ## Command Mode
 
@@ -228,10 +237,9 @@ The `unique` policy accepts only observations with one canonical target.
 `frequency` uses frozen exact counts and an exact confidence comparison.
 Sample correction also supports `exact`, which is the default. The legacy
 `--sample-correction-mode` and `--collation-mode` spellings remain accepted
-but are hidden from normal help. Use
-`quant --multi-sample-output separate|combined|both` as appropriate for the
-RAD barcode layout, and consult the exact upstream tutorial before choosing
-assay-specific policies.
+but are hidden from normal help. `quant --multi-sample-output` is deprecated, hidden and ignored: output is
+always one combined matrix. Sample names from `--sample-names` are now applied.
+Consult the exact upstream tutorial before choosing assay-specific policies.
 
 ## scATAC-seq
 
@@ -350,7 +358,7 @@ import path, not to the reusable-resource classification. Failed staging is
 removed; a stale lock after an uncatchable process kill requires administrator
 inspection before removal. No other user's lock is automatically broken.
 
-Recommended roots (resource ID is a technology/source revision, not 0.18.3):
+Recommended roots (resource ID is a technology/source revision, not 0.19.0):
 
 - Personal: `~/.local/share/taffish/resources/alevin-fry/<ID>/`
 - Site: `/usr/local/share/taffish/resources/alevin-fry/<ID>/`
@@ -433,65 +441,152 @@ of permission to read or redistribute data.
 | Ordinary working-directory I/O | `TAFFISH_CONTAINER_BACKEND=docker taf-alevin-fry ...` | `TAFFISH_CONTAINER_BACKEND=podman taf-alevin-fry ...` | `TAFFISH_CONTAINER_BACKEND=apptainer taf-alevin-fry ...` | The wrapper exposes the current working directory. |
 | External read-only input | `TAFFISH_DOCKER_RUN_ARGS="-v /host/data:/data:ro"` | `TAFFISH_PODMAN_RUN_ARGS="-v /host/data:/data:ro"` | `TAFFISH_APPTAINER_RUN_ARGS="--bind /host/data:/data:ro"` | Site/run policy; change both paths to real absolute paths. |
 
-The upstream crate provides one CPU command-line executable, with no GUI
-extra, plugin, service entry point, GPU or device interface. The ecosystem
-does include downstream graphical reporting: upstream links to
-[alevinQC](https://github.com/csoneson/alevinQC) (R/Shiny, HTML and PDF,
-primarily for Salmon alevin), and COMBINE-lab provides
-[QCatch](https://github.com/COMBINE-lab/QCatch), which consumes alevin-fry
-matrices/metadata or AnnData and performs additional QC before producing
-interactive HTML. Neither is an executable dependency of quantification.
-This CLI image does not provide or validate those report interfaces. QCatch
-requires a separately versioned Python/scientific-computing environment and
-its own input-mutation, resource and browser audit; use its documented
-separate installation for downstream QC. No GUI-completeness claim is made
-for the broader ecosystem. Simpleaf remains the separate TAFFISH workflow
-and registry-management app.
+The Rust executable has no GUI, GPU, plugin or service entry point.
+[alevinQC](https://github.com/csoneson/alevinQC) remains a separate R/Shiny
+application, primarily for Salmon alevin. The maintainer explicitly selected
+the independent [QCatch 0.2.14](https://github.com/COMBINE-lab/QCatch/releases/tag/v0.2.14)
+companion for this image instead. Simpleaf remains a separate workflow app.
 
-## Upstream `v0.18.3` Changes And Behaviors
+### QCatch Native And Offline Reports
 
-The tag-to-tag source comparison, rather than the bundled changelog (which
-still ends at 0.18.2), identifies this release's changes:
+```sh
+taf-alevin-fry qcatch --input af-quant --output qc-results \
+  --gene_id2name_file genes.tsv --chemistry 10X_3p_v3 --export_summary_table
+taf-alevin-fry qcatch-offline --input qc-results/QCatch_report.html \
+  --output qc-results/QCatch_offline.html
+```
 
-- Multi-sample barcode-correction concurrency is bounded by the effective
-  memory budget, sample histogram sizes, sample count and requested threads,
-  replacing the previous hard cap of four sample workers.
-- Collation writes a chunk-offset sidecar for seekable RAD output. Quantification
-  uses parallel readers when a valid sidecar is present; `AF_RAD_READERS=1`
-  selects the single-reader path. Default reader count is four.
-- `--compress [CODEC]` selects per-chunk LZ4 by default. Optional zstd requires
-  a separately compiled upstream feature and is not enabled in these official
-  release binaries. Legacy whole-file Snappy input remains supported.
-- The locked `libradicl` dependency advances to 0.19.1. No new external
-  runtime helper, downloader, GUI, GPU or reference/model requirement is added.
+Use your actual chemistry or `--n_partitions`; the wrapper never selects one.
+For an explicitly supplied cell set, use the upstream `--valid_cell_list`.
+`--skip_umap_tsne` omits embeddings for faster QC; `--remove_doublets` and
+`--visualize_doublets` are upstream options. Keep full original AF output
+including `featureDump.txt`, matrix/labels and metadata, or a compatible H5AD.
+The native report, modified/filtered H5AD and optional summary CSV are QCatch
+outputs. Analysis may leave partial results after failure; exit zero alone is
+not proof that a report exists (the upstream no-valid-cells branch returns zero).
 
-Streaming matrices and their write-error handling from 0.18.2 are retained.
-Upstream's production performance measurements are not packaging benchmarks
-performed by this app.
+Automatic cell calling also needs an appropriate population of background
+barcodes. The upstream 0.2.14 caller rejects a tiny, nearly uniform high-count
+fixture with `Invalid selection of 0-count barcodes!`; this is retained rather
+than patched or silently replaced by a cell set. Use `--valid_cell_list` only
+when you have independently selected that set. A compatible original H5AD is
+accepted; do not assume QCatch's already-annotated output H5AD is a clean input
+for another run with the same gene-map columns. Preserve the original input.
 
-- Barcode correction is deterministic across whitelist order, hash iteration,
-  worker completion order and thread count. Cell policies are `unique` and
-  `frequency`; sample policies are `exact`, `unique` and `frequency`.
-- Cell and sample frequency confidence accepts decimal or exact fraction
-  values. Neighbourhoods distinguish Hamming-1 from the historical
-  substitution-or-shift-1 rule.
-- GPL writes a versioned `correction_plan.bin`; current collation and ATAC
-  sorting apply those compiled decisions directly. A missing plan activates an
-  explicit older-output fallback, while a malformed or unsupported plan is an
-  error.
-- Ambiguous sample-frequency cases spill to bounded Snappy-compressed temporary
-  runs controlled by `--memory-limit` and `--tmp-dir`.
-- Single- and multi-barcode collation use bounded parallel engines.
-  `--sample-correction-mode`, `--max-records` and `--collation-mode` remain
-  accepted only as hidden compatibility spellings.
-- Quantification reuses sparse scratch/equivalence-class state, corrects
-  bootstrap and summary-stat handling, and release builds abort rather than
-  unwind on panic.
+TAFFISH requires an explicit local two-column headerless gene-ID/name TSV and
+a separate `--output`, even if an H5AD already contains symbols. It refuses
+implicit registry lookup and in-place input rewriting, without changing the
+upstream analysis algorithm. No live network fallback is exposed by the normal
+`qcatch` entry. Per-invocation writable caches are private and removed on exit;
+read-only OCI/SIF runs do not write installed Python packages. `qcatch --help`
+prints this packaging policy before the upstream option text.
 
-Compatibility retained from 0.17.x includes direct real-matrix
-`quant --dump-eqclasses` to `infer` processing, the explicit
-`--small-thresh` tiny-cell control and its JSON provenance, and the supported
-`atac generate-permit-list` then `atac sort` public surface.
+The original `QCatch_report.html` uses online Plotly/Bootstrap/D3/highlight
+assets. `qcatch-offline` preserves that file and every embedded plot payload,
+inlines a fixed browser dependency set, and writes a **new** standalone HTML.
+It fails on unknown required assets, bad bundled checksums, or any existing
+output (including a dangling symlink). Plotly comes from the installed 6.0.0
+wheel, matching the generator, rather than the template's redundant older
+2.20.0 loader. The template also references an absent `css/index.css`, which
+is shipped by neither the 0.2.14 wheel/sdist nor the generated output; this
+known dangling link is explicitly omitted and reported, not replaced by an
+invented stylesheet. Other unknown dependencies still fail. The source HTML SHA256 is embedded as provenance. External
+documentation links still need internet; no server, port, SSH tunnel or GPU is
+needed to open the resulting report in a browser. The offline copy visibly
+labels its presentation-only adaptation: fixed-size native plots scroll inside
+their containers, and the sidebar/columns stack on narrow screens. Plot scales,
+payloads and analysis results are unchanged; the original report is not rewritten.
+
+All three backends use the same installed commands. Working-directory inputs
+need no extra bind; for an external read-only project/reference directory use
+the Docker/Podman/Apptainer bind table above. For spaces retain literal inner
+quotes, e.g. `--input "'native quant'" --output "'QC results'"`.
+
+### QCatch Mapping Resources
+
+A project-generated gene map is an explicit analysis input, not a database.
+A reusable reference map may be prepared once and shared with authorized users.
+The official QCatch-resources catalog currently lists CellRanger-derived
+members at external Box URLs without payload hashes, sizes or member license
+fields. Its repository BSD notice is not treated as a grant for those external
+datasets. No such payload is bundled or automatically downloaded. Obtain an
+authorized fixed copy and its applicable notice from your reference provider;
+record the independently approved SHA256 and source revision.
+
+For reusable mappings, use the same private/site setup and read-only bind
+pattern as allowlists, but choose a separate parent such as
+`~/.local/share/taffish/resources/alevin-fry/gene-maps` or the corresponding
+`/usr/local/share` / `/opt/taffish` authorized site directory:
+
+```sh
+taf-alevin-fry qcatch-gene-map prepare --resource-root /resource-install \
+  --id reference-revision --file genes.tsv --sha256 APPROVED_DATA_SHA256 \
+  --license-file LICENSE --source urn:local:REFERENCE_REVISION --rights-reviewed --dry-run
+taf-alevin-fry qcatch-gene-map verify --resource-root /resources --id reference-revision
+```
+
+Remove `--dry-run` for import; add `--group-readable` only for an authorized
+site group. The same immutable inventory, complete validation, staged atomic
+promotion, space check, fail-closed and recovery rules apply as for allowlists.
+The prepared data file is `reference-revision/gene-map.tsv`; pass that exact
+read-only path to `--gene_id2name_file`. No auto-discovery/auto-selection is
+performed across references. Override/disable by changing/removing the explicit
+bind. Input licenses may forbid broader sharing; preparation does not grant it.
+
+### QCatch Source And Licenses
+
+QCatch tag `v0.2.14` resolves to `d6ce3eb9bf3b74b20dadc2b6a204d1d0c894f4c1`.
+The unmodified PyPI wheel SHA256 is
+`f09abd730edae019c62b6d5193c519ea30740d17e0065dd5d1ff0a9e0b943785`;
+the complete source archive SHA256 is
+`0dbb13452436bbcc69903da95206eebbfa272a516e0f83e002c96c519d031e38`.
+It is preserved under `/opt/alevin-fry/share/sources/`. Its root BSD-3-Clause
+notice explicitly assigns `find_retained_cells/` to Affero GPL v2, with MIT
+attributions. That transitional license permits distribution under GNU AGPLv3;
+the original notices, transition text and AGPLv3 text are retained under
+`share/licenses/qcatch`; installed Python sources remain in `/opt/qcatch`, and the
+full source archive remains under `share/sources`. This app's Apache license does
+not relicense those components.
+Frontend asset manifests and MIT/BSD notices remain under
+`share/qcatch-assets`; Python wheel notices remain in their distributions.
+See `share/doc/qcatch/packages.txt` and `requirements.lock` for the actual
+runtime closure. The official sdist's old uv.lock was used only as dependency
+constraints; the two new wheel locks pin QCatch 0.2.14 and the resolved closure.
+
+## Upstream `v0.19.0` Changes And Behaviors
+
+- RAD v2 (piscem 0.24+) and legacy RAD v1 are accepted. Tag roles can identify
+  barcode/UMI fields independently of their names.
+- Re-run `generate-permit-list` for 0.18.x results; collation/ATAC sorting
+  reject a different major.minor version. Re-run provisional ATAC collate and
+  deduplicate together: old whole-file Snappy ATAC collations are not compatible.
+- `quant-probe` resolves molecules per probe and sums probes into gene counts.
+  Use it only with a probe-set reference, not an ordinary transcriptome.
+  `quant` remains the earlier gene-level path; results are intentionally not
+  interchangeable. `--probe-mtx` adds the probe matrix; USA maps, gene-parsimony
+  variants and bootstrapping are not supported by this new interface.
+- `quant --dump-molecules` writes `alevin/molecules.parquet`. The input needs
+  the `ulen` file tag, including when barcode/UMI roles are otherwise present.
+  It adds compute/memory/output cost; no external Parquet writer is required.
+- `--umi-edit-dist 1` enables cr-like/cr-like-em Hamming-1 UMI correction,
+  disables the tiny-cell shortcut and is refused for USA/prefer-ambiguity.
+- Resolution names accept mixed case; missing-subset inference and worker-error
+  hangs are fixed. Invalid RAD/USA combinations fail with useful diagnostics.
+- `--sample-names` is applied, while `--multi-sample-output` remains ignored
+  and is now hidden. Pre-0.15 multi-sample collations must be regenerated.
+- The official build retains no optional zstd feature. libradicl is now 0.21.0;
+  Arrow/Parquet 60.0.0 supplies the new LZ4-compressed molecule output.
+
+Use a fresh output directory and keep the exit status and JSON provenance.
+Upstream performance and biological evaluations are not packaging benchmarks
+or scientific validations performed by this app.
+
+Example for an already-collated, appropriate probe-set input:
+
+```sh
+taf-alevin-fry alevin-fry quant-probe -i probe-permit -m probes-to-genes.tsv \
+  -o probe-counts -r cr-like-em -t 8 --probe-mtx --dump-molecules
+```
 
 ## Testing
 
@@ -526,60 +621,50 @@ When an upstream stage fails, the helper names its log-backed stage, preserves
 the original exit status and prints only the final 200 log lines so Index
 diagnostics remain useful and bounded.
 
-This release retains the previously introduced offline allowlist helper and
-adds independent chunk-codec/index regression coverage. The manifest contains
-28 command-existence probes and 9 independent tests. Current 0.18.3 candidate
-validation on 2026-09-14 passed the following checks; no older receipt substitutes
-for this candidate's validation:
+The 0.19.0 successor also checks role-only RAD v2 conversion/inspection,
+permit generation, collation, probe/gene matrix dimensions, finalized Parquet
+output, mixed-case correction and incompatible old permit/USA rejection.
 
-| Native environment | Exact direct smoke | Real generated wrapper |
+Current-source native builds and real generated-wrapper validation pass on
+ARM64 Docker/Podman and xjp native AMD64 Docker/Podman/Apptainer. There are
+414 successful independent exact commands (33 exist, one combined existence
+probe and 12 tests in nine normal/read-only/SIF runs), 645 CLI/resource wrapper
+checks, 85 QCatch wrapper checks, 25 encoding/recovery checks and five runtime
+source/permission audits. The QCatch checks include 55 signal/output/promotion
+subcases. Administrator-once site sharing has 26 behavioral checks plus two
+isolated ownership setup/cleanup actions. No old 0.18.3 receipt is counted.
+
+| Native image | Uncompressed size | Config identity |
 | --- | --- | --- |
-| Linux ARM64 Docker VM | 37 normal + 37 read-only | 44 |
-| xjp Linux AMD64 Docker | 37 normal + 37 read-only | 44 |
-| xjp Linux AMD64 Podman | 37 normal + 37 read-only | 44 |
-| xjp Linux AMD64 Apptainer | 37 actual read-only SIF | 44 |
+| AMD64 | 1,220,145,816 bytes | `7a398c89f19817ea213a6e497821a4b4e4d4db23ece8b1e5289c59e740948955` |
+| ARM64 | 1,251,665,891 bytes | `65492a51576cf17e0a009d2688e9b1134e90190c506a65796e4015b74276d3de` |
 
-All 259 direct checks run independently with networking disabled. The 176
-wrapper checks include ordinary-user execution, literal spaced/non-ASCII
-arguments, actual read-only input binds, persistent allowlist import, checksum
-and permission drift, lock/partial-state refusal and no corrupt overwrite.
-An additional administrator-once synthetic-resource scenario passes 18
-functional/permission checks across the three backends, plus 8 cleanup checks:
-authorized ordinary users can reuse the resource but cannot write it, while
-users outside the authorized group cannot read it. No host `sudo` or system
-installation is used; administrator ownership is tested through a controlled
-Docker bind of this task's synthetic files.
+The AMD64 SIF, generated from the same OCI, has SHA256
+`704b541428d9c1b7abce0da71afe32497c29ec644f6acb52e6a74d7787c1dbc2`.
+The larger image is explained by the explicitly included scientific Python/QC
+environment (about 1.2 GB under `/opt/qcatch`), not a build cache or bundled
+reference collection. Python source/license obligations are retained. Native
+QCatch Python file hashes match the wheel RECORD, and `pip check` passes.
 
-Both native images were built from the canonical Action's app-root context
-using `docker/Dockerfile`. AMD64 Docker/Podman use identical OCI configuration
-and layer identities; the actual SIF is derived from that OCI archive.
-The platform and backend coverage axes are both closed. ARM64 Podman and
-Apptainer are **not separately validated**; this thin CPU wrapper has no
-architecture-specific backend, GPU, service or mount coupling that requires
-those additional combinations. This does not claim every platform/backend
-combination was tested.
+The final offline report was actually opened at desktop and 390-pixel widths:
+navigation, long logs, help, retained/all-cell switching, zoom/reset, point
+tooltips and PNG download pass. Original plot payloads and native HTML remain
+unchanged. ARM64 Apptainer is not separately validated. One earlier ARM64
+Podman client timeout and a stopped VM were retained as failures; the final
+same-image re-run passes after the authorized Podman restart. Docker's earlier
+default-HOME stall was also retained and the final default-HOME wrapper retry
+passes. These are not upstream algorithm fixes or relaxed smoke assertions.
 
-Final uncompressed image sizes are 81,181,016 bytes (AMD64) and 103,342,170 bytes
-(ARM64). The packaged executable/documents/helpers occupy about 6 MiB; most
-space is the pinned Debian runtime. The final stage contains no build tools,
-download archives or package-manager caches. Runtime libraries and their Debian
-notices, and the upstream BSD notice, are retained. Build-time checks use stable
-version/help/library and tiny conversion checks, not a pager, full rendered help,
-browser or complete multi-threaded regression suite.
-
-Production vendor resources, site licensing decisions, the full ATAC mapper
-chain, multi-sample memory/performance scaling and biological accuracy are
-outside packaging validation. Legacy whole-file Snappy compatibility is retained
-by the reviewed upstream source; the new runtime regression suite exercises the
-current uncompressed/LZ4 formats, not a production archive collection. These are
-local candidate results, not evidence of a published image or completed Index run.
+Production vendor resources, site licensing decisions, full mapper pipelines,
+multi-sample memory/performance scaling and biological accuracy are outside
+packaging validation. No full production database/model is downloaded.
 
 ## Documentation, License, And Citation
 
 - [Upstream repository](https://github.com/COMBINE-lab/alevin-fry)
 - [Alevin-fry documentation](https://alevin-fry.readthedocs.io/en/latest/)
 - [Official tutorials](https://combine-lab.github.io/alevin-fry-tutorials/)
-- [Release `v0.18.3`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.18.3)
+- [Release `v0.19.0`](https://github.com/COMBINE-lab/alevin-fry/releases/tag/v0.19.0)
 
 TAFFISH packaging code and documentation use Apache-2.0. The bundled upstream
 binary and notices remain BSD-3-Clause. The upgraded libradicl dependency's
